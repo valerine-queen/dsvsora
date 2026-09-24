@@ -1,0 +1,952 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift Control Room</title>
+<meta name="description" content="Reconcile planned shifts against fingerprint clock-ins, auto-detect issues, and export the corrected attendance sheet to Excel.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⏱️</text></svg>">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap"></noscript>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.mini.min.js" defer></script>
+
+<style>
+:root{
+  --bg:#eef1f3; --surface:#ffffff; --surface-2:#f4f7f8; --line:#d8dee2;
+  --ink:#101820; --ink-dim:#5c6770; --ink-faint:#8b969e;
+  --accent:#0b5566; --accent-strong:#083f4c; --accent-ink:#ffffff; --accent-tint:#e2eff1;
+  --ok-bg:#dcfce7; --ok-fg:#15803d;
+  --warn-bg:#fef3c7; --warn-fg:#92400e;
+  --crit-bg:#fee2e2; --crit-fg:#b91c1c;
+  --ot-bg:#ffedd5;  --ot-fg:#c2410c;
+  --pot-bg:#ede9fe; --pot-fg:#6d28d9;
+  --shadow:0 1px 2px rgba(16,24,32,.06), 0 8px 24px -12px rgba(16,24,32,.18);
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0c1216; --surface:#141c22; --surface-2:#19232a; --line:#263038;
+    --ink:#e7edf0; --ink-dim:#93a1aa; --ink-faint:#5c6770;
+    --accent:#2fb8c4; --accent-strong:#59cdd6; --accent-ink:#04262a; --accent-tint:#122c30;
+    --ok-bg:#123524; --ok-fg:#4ade80;
+    --warn-bg:#3a2a05; --warn-fg:#fbbf24;
+    --crit-bg:#3b1212; --crit-fg:#f87171;
+    --ot-bg:#3a2008; --ot-fg:#fb923c;
+    --pot-bg:#241a3d; --pot-fg:#c4b5fd;
+    --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0c1216; --surface:#141c22; --surface-2:#19232a; --line:#263038;
+  --ink:#e7edf0; --ink-dim:#93a1aa; --ink-faint:#5c6770;
+  --accent:#2fb8c4; --accent-strong:#59cdd6; --accent-ink:#04262a; --accent-tint:#122c30;
+  --ok-bg:#123524; --ok-fg:#4ade80;
+  --warn-bg:#3a2a05; --warn-fg:#fbbf24;
+  --crit-bg:#3b1212; --crit-fg:#f87171;
+  --ot-bg:#3a2008; --ot-fg:#fb923c;
+  --pot-bg:#241a3d; --pot-fg:#c4b5fd;
+  --shadow:0 1px 2px rgba(0,0,0,.3), 0 8px 24px -12px rgba(0,0,0,.5);
+}
+
+*{box-sizing:border-box}
+body{
+  background:var(--bg); color:var(--ink);
+  font:14px/1.5 "IBM Plex Sans",system-ui,-apple-system,Arial,sans-serif;
+  padding-inline:16px; padding-block:20px 40px;
+}
+.wrap{max-width:1400px;margin:auto}
+h1,h2,h3{font-family:"IBM Plex Sans",sans-serif;text-wrap:balance;margin:0}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-dim);font-size:12.5px}
+.faint{color:var(--ink-faint)}
+a{color:var(--accent)}
+button,select,input{font:inherit;color:inherit}
+[hidden]{display:none!important}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* header */
+.topbar{
+  position:sticky;top:env(safe-area-inset-top,0px);z-index:20;
+  display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;
+  background:var(--surface);border:1px solid var(--line);border-radius:14px;
+  padding:14px 18px;margin-bottom:16px;box-shadow:var(--shadow);
+}
+.brand{display:flex;flex-direction:column;gap:2px}
+.brand .eyebrow{font-size:11px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+.brand h1{font-size:19px;font-weight:700}
+.headctl{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+
+.roletoggle{display:inline-flex;border:1px solid var(--line);border-radius:999px;padding:3px;background:var(--surface-2)}
+.roletoggle button{
+  border:0;background:transparent;padding:6px 14px;border-radius:999px;font-weight:600;font-size:12.5px;
+  cursor:pointer;color:var(--ink-dim);transition:background .15s,color .15s;
+}
+.roletoggle button.active{background:var(--accent);color:var(--accent-ink)}
+.roleNote{font-size:11px;color:var(--ink-faint);max-width:190px;line-height:1.35}
+
+.btn{
+  border:1px solid transparent;border-radius:9px;padding:8px 14px;font-weight:600;font-size:12.5px;
+  cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;
+  transition:filter .15s, transform .05s;
+}
+.btn:active{transform:translateY(1px)}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn.primary{background:var(--accent);color:var(--accent-ink)}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn.ghost{background:var(--surface-2);color:var(--ink);border-color:var(--line)}
+.btn.ghost:hover{filter:brightness(.97)}
+:root[data-theme="dark"] .btn.ghost:hover, @media (prefers-color-scheme:dark){.btn.ghost:hover{filter:brightness(1.15)}}
+.btn.dark{background:var(--ink);color:var(--bg)}
+.btn.sm{padding:5px 10px;font-size:11px;border-radius:7px}
+.file{position:relative;overflow:hidden}
+.file input{position:absolute;inset:0;opacity:0;cursor:pointer}
+
+/* kpis */
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin-bottom:16px}
+@media(max-width:900px){.kpis{grid-template-columns:repeat(2,1fr)}}
+.kpi{
+  background:var(--surface);border:1px solid var(--line);border-left:4px solid var(--line-strong,var(--line));
+  border-radius:10px;padding:12px 14px;box-shadow:var(--shadow);
+}
+.kpi .t{font-size:10.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--ink-dim)}
+.kpi .v{font-family:"IBM Plex Mono",monospace;font-size:26px;font-weight:600;margin-top:4px}
+.kpi.k-tot{border-left-color:var(--accent)}
+.kpi.k-mis{border-left-color:var(--crit-fg)}
+.kpi.k-out{border-left-color:var(--warn-fg)}
+.kpi.k-ot{border-left-color:var(--pot-fg)}
+.kpi.k-ctl{border-left-color:var(--ok-fg)}
+
+/* setup */
+details.setup{
+  background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:16px;box-shadow:var(--shadow);
+}
+details.setup summary{
+  list-style:none;cursor:pointer;padding:13px 16px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;
+}
+details.setup summary::-webkit-details-marker{display:none}
+details.setup summary h2{font-size:13.5px}
+.chev{transition:transform .15s;color:var(--ink-faint)}
+details[open] .chev{transform:rotate(90deg)}
+.setup-body{padding:0 16px 16px;display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.setup-body{grid-template-columns:1fr}}
+.setup-card{background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:14px}
+.setup-card h3{font-size:12.5px;margin-bottom:3px}
+.setup-card .toolrow{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}
+.setup-status{margin-top:10px;font-size:12px;color:var(--ink-dim)}
+.setup-status b{color:var(--ink);font-family:"IBM Plex Mono",monospace}
+.pill{display:inline-flex;align-items:center;gap:5px;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:999px;background:var(--accent-tint);color:var(--accent-strong)}
+
+/* filters */
+.filters{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.filters input,.filters select{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:7px 10px;font-size:12.5px}
+.filters input{min-width:200px;flex:1 1 200px}
+.spacer{flex:1}
+
+/* table */
+.table-card{background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden;box-shadow:var(--shadow)}
+.table-head{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.table-wrap{overflow:auto;max-height:70vh}
+table{width:100%;min-width:1900px;border-collapse:collapse;font-size:12px}
+thead th{position:sticky;top:0;z-index:1;background:var(--surface-2)}
+th{color:var(--ink-dim);text-align:center;padding:8px 9px;white-space:nowrap;font-weight:700;font-size:10.5px;letter-spacing:.03em;text-transform:uppercase;border:1px solid var(--line)}
+td{padding:6px 8px;border:1px solid var(--line);vertical-align:middle;text-align:center}
+tbody tr:hover{background:var(--surface-2)}
+.g-plan{background:color-mix(in srgb, var(--accent) 10%, var(--surface-2))}
+.g-fp{background:color-mix(in srgb, var(--warn-fg) 8%, var(--surface-2))}
+.g-act{background:color-mix(in srgb, var(--ok-fg) 8%, var(--surface-2))}
+
+.badge{display:inline-block;padding:3px 9px;border-radius:999px;font-size:10px;font-weight:700;white-space:nowrap}
+.b-ok{background:var(--ok-bg);color:var(--ok-fg)}
+.b-crit{background:var(--crit-bg);color:var(--crit-fg)}
+.b-warn{background:var(--warn-bg);color:var(--warn-fg)}
+.b-ot{background:var(--ot-bg);color:var(--ot-fg)}
+.b-pot{background:var(--pot-bg);color:var(--pot-fg)}
+
+.cell-input,.cell-select{border:1px solid var(--line);border-radius:6px;padding:5px 6px;font-size:11.5px;background:var(--surface);width:100%}
+.cell-time{width:64px;text-align:center;font-family:"IBM Plex Mono",monospace;font-weight:600;color:var(--accent-strong)}
+.cell-date{width:88px;text-align:center;font-family:"IBM Plex Mono",monospace}
+.cell-desc{width:150px}
+.empty-row td{padding:44px 20px;text-align:center;color:var(--ink-faint);font-size:13px}
+
+.toast{
+  position:fixed;left:16px;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));
+  max-width:420px;margin-inline:auto;background:var(--ink);color:var(--bg);
+  padding:11px 16px;border-radius:10px;font-size:12.5px;box-shadow:var(--shadow);
+  display:none;z-index:50;
+}
+:root[data-theme="dark"] .toast,@media(prefers-color-scheme:dark){.toast{background:var(--surface);border:1px solid var(--line);color:var(--ink)}}
+footer{text-align:center;color:var(--ink-faint);font-size:11px;margin-top:18px}
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <div class="topbar">
+    <div class="brand">
+      <span class="eyebrow">Fingerprint reconciliation</span>
+      <h1>Shift Control Room</h1>
+    </div>
+    <div class="headctl">
+      <div style="text-align:right">
+        <div class="roletoggle" role="group" aria-label="View role">
+          <button id="roleAdminBtn" onclick="setRole('Admin')">Admin</button>
+          <button id="roleViewerBtn" onclick="setRole('Viewer')">Viewer</button>
+        </div>
+      </div>
+      <button class="btn ghost sm admin-only" id="btnAutoCorrectAll">✨ Auto-correct all</button>
+      <button class="btn ghost sm admin-only" id="applyVisible">✓ Apply visible</button>
+      <button class="btn dark sm admin-only" id="exportBtn">⬇ Export .xlsx</button>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="kpi k-tot"><div class="t">Total records</div><div class="v mono" id="kTotal">0</div></div>
+    <div class="kpi k-mis"><div class="t">Shift mismatch</div><div class="v mono" id="kMismatch">0</div></div>
+    <div class="kpi k-out"><div class="t">Missing fingerprint</div><div class="v mono" id="kMissing">0</div></div>
+    <div class="kpi k-ot"><div class="t">Overtime / holiday</div><div class="v mono" id="kOT">0</div></div>
+    <div class="kpi k-ctl"><div class="t">Controlled</div><div class="v mono" id="kControlled">0</div></div>
+  </div>
+
+  <details class="setup" id="setupPanel">
+    <summary>
+      <h2>Setup &amp; import <span class="chev">▸</span></h2>
+      <span class="muted" id="setupSummary">314 embedded shift codes · showing example data</span>
+    </summary>
+    <div class="setup-body">
+      <div class="setup-card">
+        <h3>① Master shift reference</h3>
+        <div class="muted">314 shift codes are embedded by default. Upload a spreadsheet to override them.</div>
+        <div class="toolrow">
+          <label class="btn ghost sm file admin-only">📥 Upload custom master
+            <input id="masterInput" type="file" accept=".xlsx,.xls,.csv,.txt">
+          </label>
+          <button class="btn ghost sm admin-only" id="useEmbedded">Reset to embedded (314)</button>
+        </div>
+        <div class="setup-status"><b id="masterCount">0</b> master shift definitions active</div>
+      </div>
+      <div class="setup-card">
+        <h3>② Attendance data</h3>
+        <div class="muted">Upload the fingerprint / planned-schedule export (Excel or CSV).</div>
+        <div class="toolrow">
+          <label class="btn primary sm file admin-only">📂 Upload attendance file
+            <input id="dataInput" type="file" accept=".xlsx,.xls,.csv">
+          </label>
+          <button class="btn ghost sm admin-only" id="loadDemo">Load example data</button>
+        </div>
+        <div class="setup-status"><b id="dataCount">0</b> attendance records loaded <span class="pill" id="demoPill" hidden>Example data</span></div>
+      </div>
+    </div>
+  </details>
+
+  <div class="filters">
+    <input id="search" placeholder="Search position / day / date / shift…">
+    <select id="statusFilter">
+      <option value="">All control status</option>
+      <option value="Needs Review">Needs Review</option>
+      <option value="Controlled">Controlled</option>
+    </select>
+    <select id="issueFilter">
+      <option value="">All issues</option>
+      <option value="Overtime Holiday">Overtime Holiday</option>
+      <option value="Shift Mismatch">Shift Mismatch</option>
+      <option value="Missing Fingerprint">Missing Fingerprint</option>
+      <option value="Possible Overtime">Possible Overtime</option>
+      <option value="No Issue">No Issue</option>
+    </select>
+    <div class="spacer"></div>
+    <button class="btn ghost sm" id="showOnlySuggested">Show issues only</button>
+  </div>
+
+  <div class="table-card">
+    <div class="table-head">
+      <div>
+        <h2 style="font-size:14px">Attendance control queue</h2>
+        <div class="muted">Edit Actual Date/Time then press <b>Enter</b> — the shift code re-aligns automatically.</div>
+      </div>
+      <div class="muted mono" id="countText">0 records</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th rowspan="2">Day</th>
+            <th rowspan="2">Date</th>
+            <th rowspan="2">Position</th>
+            <th colspan="5" class="g-plan">Planned schedule</th>
+            <th colspan="4" class="g-fp">Fingerprint data</th>
+            <th colspan="6" class="g-act">Actual (correction / result)</th>
+            <th rowspan="2">Detected issue</th>
+            <th rowspan="2">Control status</th>
+            <th rowspan="2" class="admin-only">Action</th>
+          </tr>
+          <tr>
+            <th class="g-plan">Shift</th><th class="g-plan">Date in</th><th class="g-plan">Time in</th><th class="g-plan">Date out</th><th class="g-plan">Time out</th>
+            <th class="g-fp">Date in</th><th class="g-fp">Time in</th><th class="g-fp">Date out</th><th class="g-fp">Time out</th>
+            <th class="g-act">Shift code</th><th class="g-act">Description</th><th class="g-act">Date in</th><th class="g-act">Time in</th><th class="g-act">Date out</th><th class="g-act">Time out</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>Shift Control Room · client-side reconciliation engine</footer>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+/* ---------- embedded reference data ---------- */
+const EMBEDDED_MASTER = [
+  {"code":"OFF","desc":"Day Off","start":"06:00","end":"19:00"},
+  {"code":"H195BOFF","desc":"Hari Libur 19.30 - 03.30","start":"19:30","end":"03:30"},
+  {"code":"HK105A","desc":"Hari Kerja  10.30 - 20.00","start":"10:30","end":"20:00"},
+  {"code":"HK105AOFF","desc":"Hari Libur  10.30 - 20.00","start":"10:30","end":"20:00"},
+  {"code":"HK10A","desc":"Hari Kerja  10.00 - 15.00","start":"10:00","end":"15:00"},
+  {"code":"HK10AOFF","desc":"Hari Libur  10.00 - 15.00","start":"10:00","end":"15:00"},
+  {"code":"HK10B","desc":"Hari Kerja  10.00 - 16.00","start":"10:00","end":"16:00"},
+  {"code":"HK10BOFF","desc":"Hari Libur  10.00 - 16.00","start":"10:00","end":"16:00"},
+  {"code":"HK10C","desc":"Hari Kerja  10.00 - 18.00","start":"10:00","end":"18:00"},
+  {"code":"HK10C1","desc":"Hari Kerja  10.00 - 18.00","start":"10:00","end":"18:00"},
+  {"code":"HK10C1OFF","desc":"Hari Libur  10.00 - 18.00","start":"10:00","end":"18:00"},
+  {"code":"HK10COFF","desc":"Hari Libur  10.00 - 18.00","start":"10:00","end":"18:00"},
+  {"code":"HK10D","desc":"Hari Kerja  10.00 - 19.00","start":"10:00","end":"19:00"},
+  {"code":"HK10D1","desc":"Hari Kerja  10.00 - 19.00","start":"10:00","end":"19:00"},
+  {"code":"HK10D1OFF","desc":"Hari Libur  10.00 - 19.00","start":"10:00","end":"19:00"},
+  {"code":"HK10DOFF","desc":"Hari Libur  10.00 - 19.00","start":"10:00","end":"19:00"},
+  {"code":"HK10E","desc":"Hari Kerja  10.00 - 20.00","start":"10:00","end":"20:00"},
+  {"code":"HK10EOFF","desc":"Hari Libur  10.00 - 20.00","start":"10:00","end":"20:00"},
+  {"code":"HK10F","desc":"Hari Kerja  10.00 - 20.30","start":"10:00","end":"20:30"},
+  {"code":"HK10FOFF","desc":"Hari Libur  10.00 - 20.30","start":"10:00","end":"20:30"},
+  {"code":"HK10G","desc":"Hari Kerja  10.00 - 17.00","start":"10:00","end":"17:00"},
+  {"code":"HK10GOFF","desc":"Hari Libur  10.00 - 17.00","start":"10:00","end":"17:00"},
+  {"code":"HK11A","desc":"Hari Kerja  11.00 - 17.00","start":"11:00","end":"17:00"},
+  {"code":"HK11AOFF","desc":"Hari Libur  11.00 - 17.00","start":"11:00","end":"17:00"},
+  {"code":"HK11B","desc":"Hari Kerja  11.00 - 19.00","start":"11:00","end":"19:00"},
+  {"code":"HK11BOFF","desc":"Hari Libur  11.00 - 19.00","start":"11:00","end":"19:00"},
+  {"code":"HK11C","desc":"Hari Kerja  11.00 - 20.00","start":"11:00","end":"20:00"},
+  {"code":"HK11COFF","desc":"Hari Libur  11.00 - 20.00","start":"11:00","end":"20:00"},
+  {"code":"HK11D","desc":"Hari Kerja 11.00 - 21.00","start":"11:00","end":"21:00"},
+  {"code":"HK11DOFF","desc":"Hari Libur 11.00 - 21.00","start":"11:00","end":"21:00"},
+  {"code":"HK123A","desc":"Hari Kerja 12.30 - 21.30","start":"12:30","end":"21:30"},
+  {"code":"HK123AOFF","desc":"Hari Libur 12.30 - 21.30","start":"12:30","end":"21:30"},
+  {"code":"HK125A","desc":"Hari Kerja  12.30 - 16.30","start":"12:30","end":"16:30"},
+  {"code":"HK125AOFF","desc":"Hari Libur  12.30 - 16.30","start":"12:30","end":"16:30"},
+  {"code":"HK125B","desc":"Hari Kerja  12.30 - 17.30","start":"12:30","end":"17:30"},
+  {"code":"HK125BOFF","desc":"Hari Libur 12:30 - 17:30","start":"12:30","end":"17:30"},
+  {"code":"HK12A","desc":"Hari Kerja  12.00 - 20.00","start":"12:00","end":"20:00"},
+  {"code":"HK12AOFF","desc":"Hari Libur  12.00 - 20.00","start":"12:00","end":"20:00"},
+  {"code":"HK12B","desc":"Hari Kerja  12.00 - 21.00","start":"12:00","end":"21:00"},
+  {"code":"HK12BOFF","desc":"Hari Libur  12.00 - 21.00","start":"12:00","end":"21:00"},
+  {"code":"HK12C","desc":"Hari Kerja  12.00 - 22.00","start":"12:00","end":"22:00"},
+  {"code":"HK12COFF","desc":"Hari Libur  12.00 - 22.00","start":"12:00","end":"22:00"},
+  {"code":"HK13A","desc":"Hari Kerja  13.00 - 21.00","start":"13:00","end":"21:00"},
+  {"code":"HK13AOFF","desc":"Hari Libur  13.00 - 21.00","start":"13:00","end":"21:00"},
+  {"code":"HK13B","desc":"Hari Kerja  13.00 - 21.30","start":"13:00","end":"21:30"},
+  {"code":"HK13BOFF","desc":"Hari Libur  13.00 - 21.30","start":"13:00","end":"21:30"},
+  {"code":"HK13C","desc":"Hari Kerja  13.00 - 22.00","start":"13:00","end":"22:00"},
+  {"code":"HK13COFF","desc":"Hari Libur  13.00 - 22.00","start":"13:00","end":"22:00"},
+  {"code":"HK13D","desc":"Hari Kerja 13.00 - 18.00","start":"13:00","end":"18:00"},
+  {"code":"HK13DOFF","desc":"Hari Libur 13.00 - 18.00","start":"13:00","end":"18:00"},
+  {"code":"HK14A","desc":"Hari Kerja  14.00 - 22.00","start":"14:00","end":"22:00"},
+  {"code":"HK14AOFF","desc":"Hari Libur  14.00 - 22.00","start":"14:00","end":"22:00"},
+  {"code":"HK14B","desc":"Hari Kerja  14.00 - 22.30","start":"14:00","end":"22:30"},
+  {"code":"HK14BOFF","desc":"Hari Libur  14.00 - 22.30","start":"14:00","end":"22:30"},
+  {"code":"HK14C","desc":"Hari Kerja  14.00 - 23.00","start":"14:00","end":"23:00"},
+  {"code":"HK14COFF","desc":"Hari Libur  14.00 - 23.00","start":"14:00","end":"23:00"},
+  {"code":"HK15A","desc":"Hari Kerja  15.00 - 23.00","start":"15:00","end":"23:00"},
+  {"code":"HK15AOFF","desc":"Hari Libur  15.00 - 23.00","start":"15:00","end":"23:00"},
+  {"code":"HK15B","desc":"Hari Kerja  15.00 - 23.30","start":"15:00","end":"23:30"},
+  {"code":"HK15BOFF","desc":"Hari Libur  15.00 - 23.30","start":"15:00","end":"23:30"},
+  {"code":"HK15C","desc":"Hari Kerja 15.00 - 00.00","start":"15:00","end":"00:00"},
+  {"code":"HK15COFF","desc":"Hari Libur 15.00 - 00.00","start":"15:00","end":"00:00"},
+  {"code":"HK165A","desc":"Hari Kerja  16.30 - 00.30","start":"16:30","end":"00:30"},
+  {"code":"HK165AOFF","desc":"Hari Libur  16.30 - 00.30","start":"16:30","end":"00:30"},
+  {"code":"HK16A","desc":"Hari Kerja  16.00 - 00.00","start":"16:00","end":"00:00"},
+  {"code":"HK16AOFF","desc":"Hari Libur  16.00 - 00.00","start":"16:00","end":"00:00"},
+  {"code":"HK17A","desc":"Hari Kerja 17.00 - 01.00","start":"17:00","end":"01:00"},
+  {"code":"HK17AOFF","desc":"Hari Libur 17.00 - 01.00","start":"17:00","end":"01:00"},
+  {"code":"HK18A","desc":"Hari Kerja 18.00 - 02.00","start":"18:00","end":"02:00"},
+  {"code":"HK18AOFF","desc":"Hari Libur 18.00 - 02.00","start":"18:00","end":"02:00"},
+  {"code":"HK195A","desc":"Hari Kerja 19.30 - 03.30","start":"19:30","end":"03:30"},
+  {"code":"HK195AOFF","desc":"Hari Libur 19.30 - 03.30","start":"19:30","end":"03:30"},
+  {"code":"HK195B","desc":"Hari Kerja 19.30 - 03.30","start":"19:30","end":"03:30"},
+  {"code":"HK19A","desc":"Hari Kerja 19.00 - 03.00","start":"19:00","end":"03:00"},
+  {"code":"HK19AOFF","desc":"Hari Libur 19.00 - 03.00","start":"19:00","end":"03:00"},
+  {"code":"HK20A","desc":"Hari Kerja  20.00 - 04.00","start":"20:00","end":"04:00"},
+  {"code":"HK20AOFF","desc":"Hari Libur  20.00 - 04.00","start":"20:00","end":"04:00"},
+  {"code":"HK21A","desc":"Hari Kerja  21.00 - 05.00","start":"21:00","end":"05:00"},
+  {"code":"HK21AOFF","desc":"Hari Libur  21.00 - 05.00","start":"21:00","end":"05:00"},
+  {"code":"HK22A","desc":"Hari Kerja  22.00 - 06.00","start":"22:00","end":"06:00"},
+  {"code":"HK22AOFF","desc":"Hari Libur  22.00 - 06.00","start":"22:00","end":"06:00"},
+  {"code":"HK23A","desc":"Hari Kerja  23.00 - 07.00","start":"23:00","end":"07:00"},
+  {"code":"HK23AOFF","desc":"Hari Libur  23.00 - 07.00","start":"23:00","end":"07:00"},
+  {"code":"HK6A","desc":"Hari Kerja  06.00 - 14.00","start":"06:00","end":"14:00"},
+  {"code":"HK6AOFF","desc":"Hari Libur  06.00 - 14.00","start":"06:00","end":"14:00"},
+  {"code":"HK6B","desc":"Hari Kerja  06.00 - 15.00","start":"06:00","end":"15:00"},
+  {"code":"HK6BOFF","desc":"Hari Libur  06.00 - 15.00","start":"06:00","end":"15:00"},
+  {"code":"HK6C","desc":"Hari Kerja 06.00 - 19.00","start":"06:00","end":"19:00"},
+  {"code":"HK6COFF","desc":"Hari Libur 06.00 - 19.00","start":"06:00","end":"19:00"},
+  {"code":"HK7A","desc":"Hari Kerja  07.00 - 12.00","start":"07:00","end":"12:00"},
+  {"code":"HK7AOFF","desc":"Hari Libur  07.00 - 12.00","start":"07:00","end":"12:00"},
+  {"code":"HK7B","desc":"Hari Kerja  07.00 - 15.00","start":"07:00","end":"15:00"},
+  {"code":"HK7BOFF","desc":"Hari Libur  07.00 - 15.00","start":"07:00","end":"15:00"},
+  {"code":"HK7C","desc":"Hari Kerja  07.00 - 15.30","start":"07:00","end":"15:30"},
+  {"code":"HK7COFF","desc":"Hari Libur  07.00 - 15.30","start":"07:00","end":"15:30"},
+  {"code":"HK7D","desc":"Hari Kerja  07.00 - 16.00","start":"07:00","end":"16:00"},
+  {"code":"HK7DOFF","desc":"Hari Libur  07.00 - 16.00","start":"07:00","end":"16:00"},
+  {"code":"HK7E","desc":"Hari Kerja  07.00 - 17.00","start":"07:00","end":"17:00"},
+  {"code":"HK7EOFF","desc":"Hari Libur  07.00 - 17.00","start":"07:00","end":"17:00"},
+  {"code":"HK7F","desc":"Hari Kerja 07.00 - 20.00","start":"07:00","end":"20:00"},
+  {"code":"HK7FOFF","desc":"Hari Libur 07.00 - 20.00","start":"07:00","end":"20:00"},
+  {"code":"HK845A","desc":"Hari Kerja  08.45 - 17.00","start":"08:45","end":"17:00"},
+  {"code":"HK845AOFF","desc":"Hari Libur  08.45 - 17.00","start":"08:45","end":"17:00"},
+  {"code":"HK845B","desc":"Hari Kerja  08.45 - 12.30","start":"08:45","end":"12:30"},
+  {"code":"HK845BOFF","desc":"Hari Libur  08.45 - 12.30","start":"08:45","end":"12:30"},
+  {"code":"HK85A","desc":"Hari Kerja  08.30 - 12.30","start":"08:30","end":"12:30"},
+  {"code":"HK85AOFF","desc":"Hari Libur  08.30 - 12.30","start":"08:30","end":"12:30"},
+  {"code":"HK85B","desc":"Hari Kerja  08.30 - 14.30","start":"08:30","end":"14:30"},
+  {"code":"HK85BOFF","desc":"Hari Libur  08.30 - 14.30","start":"08:30","end":"14:30"},
+  {"code":"HK85C","desc":"Hari Kerja  08.30 - 16.30","start":"08:30","end":"16:30"},
+  {"code":"HK85COFF","desc":"Hari Libur  08.30 - 16.30","start":"08:30","end":"16:30"},
+  {"code":"HK85D","desc":"Hari Kerja  08.30 - 17.00","start":"08:30","end":"17:00"},
+  {"code":"HK85DOFF","desc":"Hari Libur  08.30 - 17.00","start":"08:30","end":"17:00"},
+  {"code":"HK85E","desc":"Hari Kerja  08.30 - 17.30","start":"08:30","end":"17:30"},
+  {"code":"HK85EOFF","desc":"Hari Libur  08.30 - 17.30","start":"08:30","end":"17:30"},
+  {"code":"HK85F","desc":"Hari Kerja  08.30 - 18.00","start":"08:30","end":"18:00"},
+  {"code":"HK85FOFF","desc":"Hari Libur  08.30 - 18.00","start":"08:30","end":"18:00"},
+  {"code":"HK85G","desc":"Hari Kerja  08.30 - 18.30","start":"08:30","end":"18:30"},
+  {"code":"HK85GOFF","desc":"Hari Libur  08.30 - 18.30","start":"08:30","end":"18:30"},
+  {"code":"HK85H","desc":"Hari Kerja 08.30 - 21.30","start":"08:30","end":"21:30"},
+  {"code":"HK85HOFF","desc":"Hari Libur 08.30 - 21.30","start":"08:30","end":"21:30"},
+  {"code":"HK85I","desc":"Hari Kerja 08.30 - 13.30","start":"08:30","end":"13:30"},
+  {"code":"HK85IOFF","desc":"Hari Libur 08.30 - 13.30","start":"08:30","end":"13:30"},
+  {"code":"HK8A","desc":"Hari Kerja  08.00 - 12.00","start":"08:00","end":"12:00"},
+  {"code":"HK8AOFF","desc":"Hari Libur  08.00 - 12.00","start":"08:00","end":"12:00"},
+  {"code":"HK8B","desc":"Hari Kerja  08.00 - 13.00","start":"08:00","end":"13:00"},
+  {"code":"HK8BOFF","desc":"Hari Libur  08.00 - 13.00","start":"08:00","end":"13:00"},
+  {"code":"HK8C","desc":"Hari Kerja  08.00 - 15.00","start":"08:00","end":"15:00"},
+  {"code":"HK8COFF","desc":"Hari Libur  08.00 - 15.00","start":"08:00","end":"15:00"},
+  {"code":"HK8D","desc":"Hari Kerja  08.00 - 16.00","start":"08:00","end":"16:00"},
+  {"code":"HK8DOFF","desc":"Hari Libur  08.00 - 16.00","start":"08:00","end":"16:00"},
+  {"code":"HK8E","desc":"Hari Kerja  08.00 - 17.00","start":"08:00","end":"17:00"},
+  {"code":"HK8EOFF","desc":"Hari Libur  08.00 - 17.00","start":"08:00","end":"17:00"},
+  {"code":"HK8F","desc":"Hari Kerja  08.00 - 18.00","start":"08:00","end":"18:00"},
+  {"code":"HK8FOFF","desc":"Hari Libur  08.00 - 18.00","start":"08:00","end":"18:00"},
+  {"code":"HK8G","desc":"Hari Kerja  08.00 - 20.00","start":"08:00","end":"20:00"},
+  {"code":"HK8GOFF","desc":"Hari Libur  08.00 - 20.00","start":"08:00","end":"20:00"},
+  {"code":"HK8H","desc":"Hari Kerja 08.00 - 21.00","start":"08:00","end":"21:00"},
+  {"code":"HK8HOFF","desc":"Hari Libur 08.00 - 21.00","start":"08:00","end":"21:00"},
+  {"code":"HK8I","desc":"Hari Kerja 08.00 - 14.00","start":"08:00","end":"14:00"},
+  {"code":"HK8IOFF","desc":"Hari Libur 08.00 - 14.00","start":"08:00","end":"14:00"},
+  {"code":"HK95A","desc":"Hari Kerja  09.30 - 17.30","start":"09:30","end":"17:30"},
+  {"code":"HK95AOFF","desc":"Hari Libur  09.30 - 17.30","start":"09:30","end":"17:30"},
+  {"code":"HK95B","desc":"Hari Kerja  09.30 - 18.30","start":"09:30","end":"18:30"},
+  {"code":"HK95BOFF","desc":"Hari Libur  09.30 - 18.30","start":"09:30","end":"18:30"},
+  {"code":"HK95C","desc":"Hari Kerja  09.30 - 19.30","start":"09:30","end":"19:30"},
+  {"code":"HK95COFF","desc":"Hari Libur  09.30 - 19.30","start":"09:30","end":"19:30"},
+  {"code":"HK9A","desc":"Hari Kerja  09.00 - 14.00","start":"09:00","end":"14:00"},
+  {"code":"HK9AOFF","desc":"Hari Libur  09.00 - 14.00","start":"09:00","end":"14:00"},
+  {"code":"HK9B","desc":"Hari Kerja  09.00 - 15.00","start":"09:00","end":"15:00"},
+  {"code":"HK9BOFF","desc":"Hari Libur  09.00 - 15.00","start":"09:00","end":"15:00"},
+  {"code":"HK9C","desc":"Hari Kerja  09.00 - 17.00","start":"09:00","end":"17:00"},
+  {"code":"HK9COFF","desc":"Hari Libur  09.00 - 17.00","start":"09:00","end":"17:00"},
+  {"code":"HK9D","desc":"Hari Kerja  09.00 - 18.00","start":"09:00","end":"18:00"},
+  {"code":"HK9DOFF","desc":"Hari Libur  09.00 - 18.00","start":"09:00","end":"18:00"},
+  {"code":"HK9E","desc":"Hari Kerja  09.00 - 19.00","start":"09:00","end":"19:00"},
+  {"code":"HK9EOFF","desc":"Hari Libur  09.00 - 19.00","start":"09:00","end":"19:00"},
+  {"code":"HK9F","desc":"Hari Kerja  09.00 - 16.00","start":"09:00","end":"16:00"},
+  {"code":"HK9FOFF","desc":"Hari Libur  09.00 - 16.00","start":"09:00","end":"16:00"}
+];
+
+const DEMO_DATASET = [
+  { Day: 'Saturday', Date: '01-08-2026', Position: 'Forklift Driver', PlannedShift: 'OFF', PlannedDateIn: '01-08-2026', PlannedTimeIn: '06:00', PlannedDateOut: '01-08-2026', PlannedTimeOut: '19:00', FingerDateIn: '01-08-2026', FingerTimeIn: '08:30', FingerDateOut: '01-08-2026', FingerTimeOut: '13:30', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Sunday', Date: '02-08-2026', Position: 'Forklift Driver', PlannedShift: 'HK7A', PlannedDateIn: '02-08-2026', PlannedTimeIn: '07:00', PlannedDateOut: '02-08-2026', PlannedTimeOut: '12:00', FingerDateIn: '', FingerTimeIn: '', FingerDateOut: '', FingerTimeOut: '', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Monday', Date: '03-08-2026', Position: 'Forklift Driver', PlannedShift: 'HK85E', PlannedDateIn: '03-08-2026', PlannedTimeIn: '08:30', PlannedDateOut: '03-08-2026', PlannedTimeOut: '17:30', FingerDateIn: '03-08-2026', FingerTimeIn: '08:28', FingerDateOut: '03-08-2026', FingerTimeOut: '17:33', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Tuesday', Date: '04-08-2026', Position: 'Warehouse Staff', PlannedShift: 'HK8A', PlannedDateIn: '04-08-2026', PlannedTimeIn: '08:00', PlannedDateOut: '04-08-2026', PlannedTimeOut: '12:00', FingerDateIn: '04-08-2026', FingerTimeIn: '08:00', FingerDateOut: '04-08-2026', FingerTimeOut: '17:00', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Wednesday', Date: '05-08-2026', Position: 'Logistics Lead', PlannedShift: 'HK14A', PlannedDateIn: '05-08-2026', PlannedTimeIn: '14:00', PlannedDateOut: '05-08-2026', PlannedTimeOut: '22:00', FingerDateIn: '05-08-2026', FingerTimeIn: '13:55', FingerDateOut: '05-08-2026', FingerTimeOut: '22:05', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' }
+];
+
+/* ---------- state ---------- */
+let currentUserRole = 'Admin';
+let master = [];
+let rows = [];
+let onlySuggested = false;
+let isDemoData = false;
+
+/* ---------- time helpers ---------- */
+function parseTime(s){
+  if(s==null||s==='') return null;
+  let x = String(s).trim().toLowerCase().replace(/\s/g,'').replace('.',':');
+  if(x==='24:00'||x==='24:00:00') return 1440;
+  let m = x.match(/^(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?(?:am|pm)?$/);
+  if(!m){
+    let d = new Date(s);
+    if(!isNaN(d)) return d.getHours()*60 + d.getMinutes();
+    return null;
+  }
+  let h = +m[1], mi = +(m[2]||0);
+  if(x.includes('pm') && h<12) h += 12;
+  if(x.includes('am') && h===12) h = 0;
+  return h*60 + mi;
+}
+function fmtMin(min){
+  if(min==null || isNaN(min)) return '';
+  let m = ((Math.round(min)%1440)+1440)%1440;
+  return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+}
+function parseShift(desc){
+  let m = String(desc).match(/(\d{1,2}(?::|\.)\d{2})\s*-\s*(\d{1,2}(?::|\.)\d{2})/);
+  if(!m) return null;
+  let a = parseTime(m[1]), b = parseTime(m[2]);
+  if(a==null || b==null) return null;
+  let cross = b <= a;
+  let duration = cross ? (1440 - a + b) : (b - a);
+  return { start: a, end: b, cross: cross, duration: duration, desc: String(desc) };
+}
+function addDays(dateStr, days){
+  if(!dateStr) return '';
+  let parts = dateStr.split('-');
+  if(parts.length !== 3) return dateStr;
+  let d = new Date(parts[2], parts[1]-1, parts[0]);
+  d.setDate(d.getDate() + days);
+  return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
+}
+function isSaturday(dayStr, dateStr){
+  let d = (dayStr || '').toLowerCase();
+  if(d.includes('sat') || d.includes('sab')) return true;
+  if(dateStr){
+    let p = dateStr.split('-');
+    if(p.length === 3){
+      let dt = p[2].length === 4 ? new Date(p[2], p[1]-1, p[0]) : new Date(p[0], p[1]-1, p[2]);
+      if(!isNaN(dt) && dt.getDay() === 6) return true;
+    }
+  }
+  return false;
+}
+
+/* ---------- shift master ---------- */
+function prepMaster(list){
+  master = list.map(x => {
+    let p = parseShift(x.desc || x.code || '');
+    let sStr = x.start || (p ? fmtMin(p.start) : '');
+    let eStr = x.end || (p ? fmtMin(p.end) : '');
+    let startMin = parseTime(sStr);
+    let endMin = parseTime(eStr);
+    let cross = (startMin != null && endMin != null) ? endMin <= startMin : false;
+    let duration = (startMin != null && endMin != null) ? (cross ? (1440 - startMin + endMin) : (endMin - startMin)) : 0;
+    return { code: x.code || '', desc: x.desc || x.code || '', start: sStr, end: eStr, startMin, endMin, cross, duration };
+  });
+  document.getElementById('masterCount').textContent = master.length;
+  updateSetupSummary();
+}
+function shiftByCode(code){
+  let c = String(code||'').trim().toLowerCase();
+  return master.find(m => m.code.toLowerCase() === c) || null;
+}
+
+/* ---------- shared candidate scorer (was duplicated in two places) ---------- */
+function scoreCandidate(m, vals, w){
+  let score = 0;
+  if(w.in && vals.inMin != null){ let d = Math.abs(vals.inMin - m.startMin); if(d>720) d = 1440-d; score += d*w.in; }
+  if(w.out && vals.outMin != null){ let d = Math.abs(vals.outMin - m.endMin); if(d>720) d = 1440-d; score += d*w.out; }
+  if(w.dur && vals.actDur != null){ score += Math.abs(vals.actDur - m.duration) * w.dur; }
+  if(w.satBias){
+    if(vals.isSat) score += (m.duration>=240 && m.duration<=390) ? -150 : 200;
+    else if(m.duration>=450 && m.duration<=600) score -= 100;
+  }
+  return score;
+}
+function bestShiftMatch(vals, w){
+  let best = null, bestScore = Infinity;
+  master.forEach(m => {
+    if(m.code === 'OFF' || m.code.endsWith('OFF')) return;
+    if(m.startMin == null || m.endMin == null) return;
+    let s = scoreCandidate(m, vals, w);
+    if(s < bestScore){ bestScore = s; best = m; }
+  });
+  return best;
+}
+function findBestShiftForTime(tIn, tOut, isSat){
+  let inMin = parseTime(tIn), outMin = parseTime(tOut);
+  if(inMin == null && outMin == null) return null;
+  let actDur = (inMin != null && outMin != null) ? (outMin < inMin ? (1440-inMin+outMin) : (outMin-inMin)) : null;
+  return bestShiftMatch({inMin, outMin, actDur, isSat}, {in:2.0, out:1.5, dur:1.0, satBias:false});
+}
+
+/* ---------- recommendation + analysis ---------- */
+function recommendShift(r){
+  if(r.ManualShiftCode){
+    let m = shiftByCode(r.ManualShiftCode);
+    if(m) return m;
+  }
+  let fin = parseTime(r.ActualTimeIn || r.FingerTimeIn);
+  let fout = parseTime(r.ActualTimeOut || r.FingerTimeOut);
+  let actDur = (fin != null && fout != null) ? (fout < fin ? (1440-fin+fout) : (fout-fin)) : null;
+  let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
+  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+
+  if(fin == null && fout == null && isPlannedOff){
+    return shiftByCode('OFF') || { code: 'OFF', desc: 'Day Off', start: '06:00', end: '19:00', cross: false, duration: 780 };
+  }
+  if(fin == null && fout == null && !isPlannedOff){
+    let m = master.find(x => x.code.toLowerCase() === (r.PlannedShift||'').toLowerCase() || x.desc.toLowerCase().includes((r.PlannedShift||'').toLowerCase()));
+    if(m) return m;
+  }
+  return bestShiftMatch({inMin: fin, outMin: null, actDur, isSat}, {in:1.5, out:0, dur:1.0, satBias:true})
+      || (shiftByCode('OFF') || master[0]);
+}
+
+function analyze(r){
+  let matchedShift = recommendShift(r);
+  r.ActualShiftCode = r.ManualShiftCode || (matchedShift ? matchedShift.code : 'OFF');
+  if(!r.ManualShiftDescFlag){
+    r.ActualShiftDesc = matchedShift ? matchedShift.desc : (r.ActualShiftDesc || 'Day Off');
+  }
+  if(!r.ActualDateIn) r.ActualDateIn = r.FingerDateIn || r.PlannedDateIn || r.Date;
+  if(!r.ActualTimeIn) r.ActualTimeIn = r.FingerTimeIn || r.PlannedTimeIn || (matchedShift ? matchedShift.start : '');
+
+  if(!r.ActualTimeOut){
+    if(r.FingerTimeOut){
+      r.ActualTimeOut = r.FingerTimeOut;
+      r.ActualDateOut = r.FingerDateOut || r.ActualDateIn;
+    } else if(matchedShift && matchedShift.end){
+      r.ActualTimeOut = matchedShift.end;
+      r.ActualDateOut = matchedShift.cross ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
+    }
+  } else if(!r.ActualDateOut || r.ManualShiftCode){
+    r.ActualDateOut = (matchedShift && matchedShift.cross) ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
+  }
+
+  let issues = [];
+  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+  let fingerIn = parseTime(r.FingerTimeIn);
+  let fingerOut = parseTime(r.FingerTimeOut);
+
+  if(isPlannedOff && (fingerIn != null || fingerOut != null || r.ActualShiftCode !== 'OFF')) issues.push('Overtime Holiday');
+  if(!isPlannedOff && fingerIn == null && fingerOut == null && !r.UserModifiedTime) issues.push('Missing Fingerprint');
+  if(!isPlannedOff && r.PlannedShift && r.PlannedShift !== r.ActualShiftCode) issues.push('Shift Mismatch');
+
+  let actInMin = parseTime(r.ActualTimeIn);
+  let actOutMin = parseTime(r.ActualTimeOut);
+  if(!isPlannedOff && actInMin != null && actOutMin != null && matchedShift && matchedShift.duration > 0){
+    let actDur = actOutMin < actInMin ? (1440-actInMin+actOutMin) : (actOutMin-actInMin);
+    if(actDur - matchedShift.duration >= 120) issues.push('Possible Overtime');
+  }
+  r.Issue = issues.join(' + ') || 'No Issue';
+  return r;
+}
+
+/* ---------- render ---------- */
+function badgeClass(issue){
+  if(issue.includes('Overtime Holiday')) return 'b-ot';
+  if(issue.includes('Mismatch')) return 'b-crit';
+  if(issue.includes('Missing')) return 'b-warn';
+  if(issue.includes('Overtime')) return 'b-pot';
+  return 'b-ok';
+}
+function filteredData(){
+  let q = document.getElementById('search').value.toLowerCase();
+  let st = document.getElementById('statusFilter').value;
+  let iss = document.getElementById('issueFilter').value;
+  return rows.filter(r => {
+    let matchQ = !q || r.Position.toLowerCase().includes(q) || r.Day.toLowerCase().includes(q) || r.Date.includes(q) || r.PlannedShift.toLowerCase().includes(q);
+    let matchSt = !st || r.ControlStatus === st;
+    let matchIss = !iss || r.Issue.includes(iss);
+    let matchSug = !onlySuggested || (r.Issue !== 'No Issue' && r.ControlStatus !== 'Controlled');
+    return matchQ && matchSt && matchIss && matchSug;
+  });
+}
+function esc(x){ return String(x??'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+function escAttr(x){ return esc(x).replace(/\n/g,' '); }
+
+function render(){
+  rows.forEach(analyze);
+  let data = filteredData();
+
+  document.getElementById('kTotal').textContent = rows.length;
+  document.getElementById('kMismatch').textContent = rows.filter(r => r.Issue.includes('Shift Mismatch')).length;
+  document.getElementById('kMissing').textContent = rows.filter(r => r.Issue.includes('Missing Fingerprint')).length;
+  document.getElementById('kOT').textContent = rows.filter(r => r.Issue.includes('Overtime Holiday') || r.Issue.includes('Possible Overtime')).length;
+  document.getElementById('kControlled').textContent = rows.filter(r => r.ControlStatus === 'Controlled').length;
+  document.getElementById('countText').textContent = data.length + ' records';
+  document.getElementById('dataCount').textContent = rows.length;
+  document.getElementById('demoPill').hidden = !isDemoData;
+  updateSetupSummary();
+
+  let tbody = document.getElementById('tbody');
+  if(!data.length){
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="20"><b>No attendance data loaded.</b><br>Upload a file or click “Load example data” above.</td></tr>`;
+    updateRoleUI();
+    return;
+  }
+
+  let isAdmin = currentUserRole === 'Admin';
+  tbody.innerHTML = data.map(r => {
+    let idx = rows.indexOf(r);
+    let isCtl = r.ControlStatus === 'Controlled';
+    let shiftOptions = master.map(m => `<option value="${m.code}" ${(r.ActualShiftCode===m.code)?'selected':''}>${m.code}</option>`).join('');
+    return `<tr>
+      <td><b>${esc(r.Day)}</b></td>
+      <td class="mono">${esc(r.Date)}</td>
+      <td><b>${esc(r.Position)}</b></td>
+
+      <td>${esc(r.PlannedShift)}</td>
+      <td class="mono">${esc(r.PlannedDateIn)}</td>
+      <td class="mono">${esc(r.PlannedTimeIn)}</td>
+      <td class="mono">${esc(r.PlannedDateOut)}</td>
+      <td class="mono">${esc(r.PlannedTimeOut)}</td>
+
+      <td class="mono">${esc(r.FingerDateIn) || '—'}</td>
+      <td class="mono">${esc(r.FingerTimeIn) || '—'}</td>
+      <td class="mono">${esc(r.FingerDateOut) || '—'}</td>
+      <td class="mono">${esc(r.FingerTimeOut) || '—'}</td>
+
+      <td>${isAdmin ? `<select class="cell-select" onchange="setManualShiftCode(${idx}, this.value)">${shiftOptions}</select>` : `<b>${esc(r.ActualShiftCode)}</b>`}</td>
+      <td>${isAdmin ? `<input class="cell-input cell-desc" value="${escAttr(r.ActualShiftDesc)}" placeholder="Shift description…" onchange="setManualShiftDesc(${idx}, this.value)">` : esc(r.ActualShiftDesc)}</td>
+      <td>${isAdmin ? `<input class="cell-input cell-date" value="${escAttr(r.ActualDateIn)}" onkeydown="handleInputKey(event, ${idx}, 'ActualDateIn', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualDateIn', this.value)">` : `<span class="mono">${esc(r.ActualDateIn)}</span>`}</td>
+      <td>${isAdmin ? `<input class="cell-input cell-time" value="${escAttr(r.ActualTimeIn)}" placeholder="--:--" onkeydown="handleInputKey(event, ${idx}, 'ActualTimeIn', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualTimeIn', this.value)">` : `<span class="mono">${esc(r.ActualTimeIn)}</span>`}</td>
+      <td>${isAdmin ? `<input class="cell-input cell-date" value="${escAttr(r.ActualDateOut)}" onkeydown="handleInputKey(event, ${idx}, 'ActualDateOut', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualDateOut', this.value)">` : `<span class="mono">${esc(r.ActualDateOut)}</span>`}</td>
+      <td>${isAdmin ? `<input class="cell-input cell-time" value="${escAttr(r.ActualTimeOut)}" placeholder="--:--" onkeydown="handleInputKey(event, ${idx}, 'ActualTimeOut', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualTimeOut', this.value)">` : `<span class="mono">${esc(r.ActualTimeOut)}</span>`}</td>
+
+      <td><span class="badge ${badgeClass(r.Issue)}">${esc(r.Issue)}</span></td>
+      <td>${isAdmin ? `<select class="cell-select" onchange="setControl(${idx}, this.value)"><option ${!isCtl?'selected':''}>Needs Review</option><option ${isCtl?'selected':''}>Controlled</option></select>` : `<b>${esc(r.ControlStatus)}</b>`}</td>
+      ${isAdmin ? `<td><button class="btn ghost sm" onclick="applySingle(${idx})">Apply</button></td>` : ''}
+    </tr>`;
+  }).join('');
+
+  updateRoleUI();
+}
+
+function updateSetupSummary(){
+  document.getElementById('setupSummary').textContent =
+    `${master.length} shift codes loaded · ${rows.length} record${rows.length===1?'':'s'}${isDemoData ? ' (example data)' : ''}`;
+}
+
+/* ---------- interactions ---------- */
+function handleInputKey(e, idx, field, val){
+  if(e.key === 'Enter'){ e.target.blur(); setFieldTimeDate(idx, field, val); }
+}
+function setFieldTimeDate(idx, field, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx][field] = val;
+  rows[idx].UserModifiedTime = true;
+  rows[idx].ManualShiftCode = '';
+  let isSat = isSaturday(rows[idx].Day, rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
+  let bestMatch = findBestShiftForTime(rows[idx].ActualTimeIn, rows[idx].ActualTimeOut, isSat);
+  if(bestMatch){
+    rows[idx].ActualShiftCode = bestMatch.code;
+    rows[idx].ActualShiftDesc = bestMatch.desc;
+    rows[idx].ActualDateOut = bestMatch.cross ? addDays(rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date, 1) : (rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
+  }
+  rows[idx].ControlStatus = 'Controlled';
+  render();
+  toast('Time updated — shift code realigned automatically.');
+}
+function setManualShiftCode(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ManualShiftCode = val;
+  rows[idx].ActualShiftCode = val;
+  rows[idx].UserModifiedTime = false;
+  let m = shiftByCode(val);
+  if(m){
+    rows[idx].ActualShiftDesc = m.desc;
+    rows[idx].ManualShiftDescFlag = false;
+    if(m.start && !rows[idx].FingerTimeIn) rows[idx].ActualTimeIn = m.start;
+    if(m.end) rows[idx].ActualTimeOut = m.end;
+    rows[idx].ActualDateOut = m.cross ? addDays(rows[idx].ActualDateIn || rows[idx].Date, 1) : (rows[idx].ActualDateIn || rows[idx].Date);
+  }
+  render();
+  toast('Shift code & description updated.');
+}
+function setManualShiftDesc(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ActualShiftDesc = val;
+  rows[idx].ManualShiftDescFlag = true;
+  render();
+  toast('Shift description updated.');
+}
+function setControl(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ControlStatus = val;
+  render();
+  toast('Status set to ' + val + '.');
+}
+function applySingle(idx){
+  if(currentUserRole !== 'Admin') return;
+  let r = rows[idx];
+  if(r.UserModifiedTime || (!r.ManualShiftCode && (r.ActualTimeIn || r.ActualTimeOut))){
+    let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
+    let best = findBestShiftForTime(r.ActualTimeIn || r.FingerTimeIn, r.ActualTimeOut || r.FingerTimeOut, isSat);
+    if(best){
+      r.ActualShiftCode = best.code;
+      r.ManualShiftCode = best.code;
+      if(!r.ManualShiftDescFlag) r.ActualShiftDesc = best.desc;
+      r.ActualDateOut = best.cross ? addDays(r.ActualDateIn || r.PlannedDateIn || r.Date, 1) : (r.ActualDateIn || r.PlannedDateIn || r.Date);
+    }
+  } else {
+    let m = shiftByCode(r.ManualShiftCode || r.ActualShiftCode);
+    if(m){
+      r.ActualShiftCode = m.code;
+      if(!r.ManualShiftDescFlag) r.ActualShiftDesc = m.desc;
+      if(!r.ActualTimeIn && m.start) r.ActualTimeIn = m.start;
+      if(m.end) r.ActualTimeOut = m.end;
+      r.ActualDateOut = m.cross ? addDays(r.ActualDateIn || r.Date, 1) : (r.ActualDateIn || r.Date);
+    }
+  }
+  r.ControlStatus = 'Controlled';
+  render();
+  toast('Shift auto-detected & controlled.');
+}
+function autoCorrectAll(){
+  if(currentUserRole !== 'Admin' || !rows.length) return;
+  rows.forEach((r, idx) => applySingle(idx));
+  render();
+  toast(`Auto-correction applied to all ${rows.length} records.`);
+}
+function applyVisible(){
+  if(currentUserRole !== 'Admin') return;
+  let vis = filteredData();
+  vis.forEach(r => applySingle(rows.indexOf(r)));
+  render();
+  toast(`Applied auto-detection to ${vis.length} visible record(s).`);
+}
+
+/* ---------- export (plain browser download — this page runs standalone, no Artifact sandbox) ---------- */
+function exportData(){
+  if(currentUserRole !== 'Admin'){ toast('Admin role required to export.'); return; }
+  if(!rows.length){ toast('No data to export yet.'); return; }
+
+  let out = rows.map(r => ({
+    'Day': r.Day, 'Date': r.Date, 'Position': r.Position,
+    'Planned Shift': r.PlannedShift, 'Planned Date In': r.PlannedDateIn, 'Planned Time In': r.PlannedTimeIn, 'Planned Date Out': r.PlannedDateOut, 'Planned Time Out': r.PlannedTimeOut,
+    'Finger Date In': r.FingerDateIn, 'Finger Time In': r.FingerTimeIn, 'Finger Date Out': r.FingerDateOut, 'Finger Time Out': r.FingerTimeOut,
+    'Actual Shift Code': r.ActualShiftCode, 'Actual Shift Description': r.ActualShiftDesc,
+    'Actual Date In': r.ActualDateIn, 'Actual Time In': r.ActualTimeIn, 'Actual Date Out': r.ActualDateOut, 'Actual Time Out': r.ActualTimeOut,
+    'Detected Issue': r.Issue, 'Control Status': r.ControlStatus
+  }));
+  let ws = XLSX.utils.json_to_sheet(out);
+  let wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, 'Attendance Control');
+  XLSX.writeFile(wb, 'Hasil_Koreksi_Absensi.xlsx');
+  toast('Excel file downloaded.');
+}
+
+/* ---------- role / setup ---------- */
+function setRole(role){
+  currentUserRole = role;
+  document.getElementById('roleAdminBtn').classList.toggle('active', role === 'Admin');
+  document.getElementById('roleViewerBtn').classList.toggle('active', role === 'Viewer');
+  updateRoleUI();
+  render();
+}
+function updateRoleUI(){
+  let isAdmin = currentUserRole === 'Admin';
+  document.querySelectorAll('.admin-only').forEach(el => el.classList.toggle('hidden', !isAdmin));
+}
+
+/* ---------- file import ---------- */
+function mapAttendance(o){
+  return {
+    Day: String(o['Day'] || o['day'] || ''),
+    Date: String(o['Date'] || o['date'] || ''),
+    Position: String(o['Position'] || o['position'] || ''),
+    PlannedShift: String(o['Planned Shift'] || o['PlannedShift'] || o['Planned_Shift'] || ''),
+    PlannedDateIn: String(o['Planned Date In'] || o['PlannedDateIn'] || o['Planned DateIn'] || ''),
+    PlannedTimeIn: String(o['Planned Time In'] || o['PlannedTimeIn'] || o['Planned TimeIn'] || ''),
+    PlannedDateOut: String(o['Planned Date Out'] || o['PlannedDateOut'] || o['Planned DateOut'] || ''),
+    PlannedTimeOut: String(o['Planned Time Out'] || o['PlannedTimeOut'] || o['Planned TimeOut'] || ''),
+    FingerDateIn: String(o['Finger Date In'] || o['FingerDateIn'] || o['Finger DateIn'] || ''),
+    FingerTimeIn: String(o['Finger Time In'] || o['FingerTimeIn'] || o['Finger TimeIn'] || ''),
+    FingerDateOut: String(o['Finger Date Out'] || o['FingerDateOut'] || o['Finger DateOut'] || ''),
+    FingerTimeOut: String(o['Finger Time Out'] || o['FingerTimeOut'] || o['Finger TimeOut'] || ''),
+    ManualShiftCode: '',
+    ActualShiftDesc: String(o['Actual Shift'] || o['ActualShift'] || o['Actual Shift Desc'] || o['Actual Shift Description'] || ''),
+    ManualShiftDescFlag: false,
+    UserModifiedTime: false,
+    ActualDateIn: String(o['Actual Date In'] || o['ActualDateIn'] || ''),
+    ActualTimeIn: String(o['Actual Time In'] || o['ActualTimeIn'] || ''),
+    ActualDateOut: String(o['Actual Date Out'] || o['ActualDateOut'] || ''),
+    ActualTimeOut: String(o['Actual Time Out'] || o['ActualTimeOut'] || ''),
+    ControlStatus: 'Needs Review',
+    Issue: ''
+  };
+}
+
+document.getElementById('dataInput').onchange = e => {
+  if(!e.target.files[0]) return;
+  let fr = new FileReader();
+  fr.onload = ev => {
+    try{
+      let wb = XLSX.read(ev.target.result, { type: 'array' });
+      let ws = wb.Sheets[wb.SheetNames[0]];
+      let rawJson = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      let headerIdx = 0;
+      for(let i=0; i<Math.min(10, rawJson.length); i++){
+        let rowStr = rawJson[i].join(' ').toLowerCase();
+        if(rowStr.includes('planned shift') || rowStr.includes('planned date') || rowStr.includes('finger date') || rowStr.includes('position')){ headerIdx = i; break; }
+      }
+      let d = XLSX.utils.sheet_to_json(ws, { range: headerIdx, defval: '' });
+      rows = d.map(mapAttendance).filter(r => r.Day || r.Date || r.Position || r.PlannedShift);
+      isDemoData = false;
+      document.getElementById('setupPanel').open = false;
+      render();
+      toast(`${rows.length} attendance records loaded and analyzed.`);
+    } catch(err){ alert('Could not read that Excel/CSV file. Check the format and try again.'); }
+  };
+  fr.readAsArrayBuffer(e.target.files[0]);
+};
+
+document.getElementById('masterInput').onchange = e => {
+  if(!e.target.files[0]) return;
+  let fr = new FileReader();
+  fr.onload = ev => {
+    try{
+      let wb = XLSX.read(ev.target.result, { type: 'array' });
+      let ws = wb.Sheets[wb.SheetNames[0]];
+      let d = XLSX.utils.sheet_to_json(ws, { defval: '' });
+      let list = d.map(x => ({
+        code: String(x['ShiftCode'] || x['Shift Code'] || x.Code || '').trim(),
+        desc: String(x['ShiftName'] || x['Shift Name'] || x.Description || '').trim(),
+        start: String(x['ShiftStartTime'] || x['Start Time'] || '').trim(),
+        end: String(x['ShiftEndTime'] || x['End Time'] || '').trim()
+      })).filter(x => x.code);
+      if(list.length > 0){ prepMaster(list); render(); toast(master.length + ' custom master shifts loaded.'); }
+    } catch(err){ alert('Could not read that shift master file.'); }
+  };
+  fr.readAsArrayBuffer(e.target.files[0]);
+};
+
+document.getElementById('useEmbedded').onclick = () => { prepMaster(EMBEDDED_MASTER); render(); toast('Embedded master (314 shifts) restored.'); };
+document.getElementById('loadDemo').onclick = () => {
+  rows = DEMO_DATASET.map(x => mapAttendance({...x}));
+  isDemoData = true;
+  render();
+  toast('Example data loaded.');
+};
+document.getElementById('btnAutoCorrectAll').onclick = autoCorrectAll;
+document.getElementById('applyVisible').onclick = applyVisible;
+document.getElementById('exportBtn').onclick = exportData;
+document.getElementById('showOnlySuggested').onclick = () => {
+  onlySuggested = !onlySuggested;
+  document.getElementById('showOnlySuggested').textContent = onlySuggested ? 'Show all records' : 'Show issues only';
+  render();
+};
+['search','statusFilter','issueFilter'].forEach(id => document.getElementById(id).addEventListener('input', render));
+
+/* ---------- init: open in a realistic working state ---------- */
+function toast(msg){
+  let t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  clearTimeout(t._h);
+  t._h = setTimeout(() => { t.style.display = 'none'; }, 2600);
+}
+prepMaster(EMBEDDED_MASTER);
+rows = DEMO_DATASET.map(x => mapAttendance({...x}));
+isDemoData = true;
+setRole('Admin');
+</script>
+</body>
+</html>
