@@ -270,9 +270,6 @@ footer{text-align:center;color:var(--ink-faint);font-size:11px;margin-top:18px}
       <table>
         <thead>
           <tr>
-            <th rowspan="2">Day</th>
-            <th rowspan="2">Date</th>
-            <th rowspan="2">Position</th>
             <th colspan="5" class="g-plan">Planned schedule</th>
             <th colspan="4" class="g-fp">Fingerprint data</th>
             <th colspan="6" class="g-act">Actual (correction / result)</th>
@@ -687,7 +684,7 @@ function render(){
 
   let tbody = document.getElementById('tbody');
   if(!data.length){
-    tbody.innerHTML = `<tr class="empty-row"><td colspan="20"><b>No attendance data loaded.</b><br>Upload a file or click “Load example data” above.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="17"><b>No attendance data loaded.</b><br>Upload a file or click “Load example data” above.</td></tr>`;
     updateRoleUI();
     return;
   }
@@ -698,10 +695,6 @@ function render(){
     let isCtl = r.ControlStatus === 'Controlled';
     let shiftOptions = master.map(m => `<option value="${m.code}" ${(r.ActualShiftCode===m.code)?'selected':''}>${m.code}</option>`).join('');
     return `<tr>
-      <td><b>${esc(r.Day)}</b></td>
-      <td class="mono">${esc(r.Date)}</td>
-      <td><b>${esc(r.Position)}</b></td>
-
       <td>${esc(r.PlannedShift)}</td>
       <td class="mono">${esc(r.PlannedDateIn)}</td>
       <td class="mono">${esc(r.PlannedTimeIn)}</td>
