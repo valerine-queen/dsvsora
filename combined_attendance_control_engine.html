@@ -1,0 +1,1144 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Attendance Correction & Control v4.2 - Integrated System</title>
+<!-- SheetJS XLSX Library for Excel Parsing and Export -->
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#f5f6f8;color:#202124;font:13px Arial,Helvetica,sans-serif;line-height:1.4}
+.wrap{max-width:1950px;margin:auto;padding:24px}
+.head{display:flex;justify-content:space-between;gap:20px;align-items:center;margin-bottom:20px;flex-wrap:wrap}
+h1{margin:0 0 4px;font-size:24px;color:#1e293b;font-weight:700}
+.sub,.muted{color:#64748b;font-size:12px}
+.badge-role{display:inline-block;padding:4px 10px;border-radius:12px;font-weight:bold;font-size:11px}
+.badge-admin{background:#dbeafe;color:#1e40af}
+.badge-user{background:#f1f5f9;color:#475569}
+
+/* Modals */
+.modal-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(15,23,42,0.6);display:flex;align-items:center;justify-content:center;z-index:9999}
+.modal-card{background:#fff;padding:32px;border-radius:16px;width:380px;max-width:90%;box-shadow:0 10px 25px -5px rgba(0,0,0,0.1)}
+.modal-card h2{margin:0 0 6px;font-size:20px;color:#0f172a}
+.modal-card .field{margin-top:14px}
+.modal-card label{display:block;font-size:11px;font-weight:700;color:#475569;margin-bottom:4px}
+.modal-card input,.modal-card select{width:100%;padding:10px;border:1px solid #cbd5e1;border-radius:8px;font-size:12px}
+
+/* UI Elements & Components */
+.toolbar,.panel,.card,.table-card{background:#fff;border:1px solid #e2e8f0;border-radius:12px}
+.toolbar{padding:14px;display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.btn,.file{border:0;border-radius:8px;padding:9px 14px;font-weight:600;font-size:12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:all 0.2s}
+.btn:disabled,.file.disabled{opacity:0.5;cursor:not-allowed;pointer-events:none}
+.primary{background:#2563eb;color:#fff}.primary:hover{background:#1d4ed8}
+.dark{background:#0f172a;color:#fff}.dark:hover{background:#1e293b}
+.light{background:#f1f5f9;color:#334155}.light:hover{background:#e2e8f0}
+.green{background:#16a34a;color:#fff}.green:hover{background:#15803d}
+.purple{background:#9333ea;color:#fff}.purple:hover{background:#7e22ce}
+.file input{display:none}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:16px}
+.panel{padding:18px}
+.panel h2,.table-head h2{margin:0 0 4px;font-size:15px;color:#0f172a}
+.master-status{margin-top:12px;padding:12px;border-radius:8px;background:#f8fafc;border:1px solid #f1f5f9}
+.master-status b{font-size:18px;color:#0f172a}
+
+.kpis{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+.kpi{padding:14px;border-left:4px solid #cbd5e1}
+.kpi.k-tot{border-left-color:#3b82f6}
+.kpi.k-mis{border-left-color:#ef4444}
+.kpi.k-out{border-left-color:#f59e0b}
+.kpi.k-ot{border-left-color:#8b5cf6}
+.kpi.k-ctl{border-left-color:#22c55e}
+.kpi .t{font-size:11px;color:#64748b;font-weight:600}
+.kpi .v{font-size:24px;font-weight:700;margin-top:4px;color:#0f172a}
+
+.filters{padding:12px;display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;align-items:center}
+.filters input,.filters select,.cell-input,.cell-select{border:1px solid #cbd5e1;border-radius:6px;padding:6px 8px;font-size:11px;background:#fff}
+.filters input{min-width:180px}
+.cell-input-time{width:70px;text-align:center;font-weight:bold;color:#1e40af;background:#f0fdf4}
+.cell-input-date{width:95px;text-align:center;background:#f0fdf4}
+.cell-input-desc{width:160px;font-size:11px}
+
+.table-card{overflow:hidden}
+.table-head{padding:16px;display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:1px solid #f1f5f9;flex-wrap:wrap}
+.table-wrap{overflow:auto}
+table{width:100%;min-width:2200px;border-collapse:collapse;font-size:11px}
+th{background:#f8fafc;color:#475569;text-align:center;padding:8px 10px;white-space:nowrap;font-weight:700;border:1px solid #e2e8f0}
+td{padding:8px 10px;border:1px solid #f1f5f9;vertical-align:middle;text-align:center}
+tr:hover{background:#f8fafc}
+
+.group-header-plan{background:#eff6ff;color:#1e40af}
+.group-header-finger{background:#fefce8;color:#854d0e}
+.group-header-act{background:#f0fdf4;color:#166534}
+
+.badge{display:inline-block;padding:3px 8px;border-radius:12px;font-size:10px;font-weight:700}
+.bg-red{background:#fee2e2;color:#991b1b}
+.bg-yellow{background:#fef3c7;color:#92400e}
+.bg-purple{background:#f3e8ff;color:#6b21a8}
+.bg-orange{background:#ffedd5;color:#c2410c}
+.bg-ok{background:#dcfce7;color:#166534}
+
+.toast{position:fixed;bottom:20px;right:20px;background:#0f172a;color:#fff;padding:10px 16px;border-radius:8px;font-size:12px;box-shadow:0 4px 12px rgba(0,0,0,0.15);display:none;z-index:10000}
+.hidden{display:none!important}
+
+@media(max-width:1000px){.grid{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(2,1fr)}}
+</style>
+</head>
+<body>
+
+<!-- Login Modal -->
+<div id="loginModal" class="modal-overlay">
+  <div class="modal-card">
+    <h2>Control System v4.2 Login</h2>
+    <div class="sub">Pilih Role dan Masukkan Password</div>
+    <div class="field">
+      <label>Role Account</label>
+      <select id="loginRole">
+        <option value="Admin">Admin (Full Control)</option>
+        <option value="User">User (Read-Only)</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="loginPass" placeholder="Masukkan password">
+    </div>
+    <div style="margin-top:20px">
+      <button class="btn primary" style="width:100%;justify-content:center" id="btnLogin">Sign In</button>
+    </div>
+  </div>
+</div>
+
+<!-- Change Password Modal -->
+<div id="changePassModal" class="modal-overlay hidden">
+  <div class="modal-card">
+    <h2>🔑 Change Admin Password</h2>
+    <div class="sub">Perbarui password akun Admin Anda</div>
+    <div class="field">
+      <label>Password saat ini</label>
+      <input type="password" id="currPass" placeholder="Password lama">
+    </div>
+    <div class="field">
+      <label>Password Baru</label>
+      <input type="password" id="newPass" placeholder="Password baru">
+    </div>
+    <div class="field">
+      <label>Konfirmasi Password Baru</label>
+      <input type="password" id="confirmPass" placeholder="Ulangi password baru">
+    </div>
+    <div style="margin-top:20px;display:flex;gap:8px">
+      <button class="btn primary" style="flex:1;justify-content:center" id="btnSavePass">Simpan Password</button>
+      <button class="btn light" id="btnCancelPass">Batal</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap">
+  <div class="head">
+    <div>
+      <h1>Attendance Correction & Control v4.2</h1>
+      <div class="sub">Full Interactive Manual Correction & Real-Time Auto Alignment Engine</div>
+    </div>
+    <div style="text-align:right">
+      <span id="roleBadge" class="badge-role badge-user">Role: Guest</span>
+      <button class="btn light admin-only hidden" id="btnOpenChangePass" style="margin-left:8px">🔑 Change Password</button>
+      <button class="btn light" id="btnLogout" style="margin-left:8px">Logout</button>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>① Master Shift Reference (Patokan Paten)</h2>
+      <div class="muted">Master 314 Kode Shift paten tertanam otomatis.</div>
+      <div class="toolbar" style="padding:0;border:0;margin:12px 0 0">
+        <label class="file light" id="lblMasterInput">
+          📥 Custom Shift Master
+          <input id="masterInput" type="file" accept=".xlsx,.xls,.csv,.txt,.md">
+        </label>
+        <button class="btn light" id="useEmbedded">Reset ke Master Embedded (314 Shift)</button>
+      </div>
+      <div class="master-status">
+        <b id="masterCount">0</b> master shift definitions active
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>② Import Attendance Data File (Excel / CSV)</h2>
+      <div class="muted">Upload file Excel / CSV atau gunakan Reference Demo Dataset.</div>
+      <div class="toolbar" style="padding:0;border:0;margin:12px 0 0">
+        <label class="file primary" id="lblDataInput" style="font-size:13px;padding:10px 18px">
+          📂 UPLOAD FILE EXCEL / CSV DISINI
+          <input id="dataInput" type="file" accept=".xlsx,.xls,.csv">
+        </label>
+        <button class="btn light" id="loadDemo">Load Reference Demo</button>
+      </div>
+      <div class="master-status">
+        <b id="dataCount">0</b> attendance records loaded
+      </div>
+    </div>
+  </div>
+
+  <div class="kpis">
+    <div class="card kpi k-tot"><div class="t">Total Records</div><div class="v" id="kTotal">0</div></div>
+    <div class="card kpi k-mis"><div class="t">Shift Mismatch</div><div class="v" id="kMismatch">0</div></div>
+    <div class="card kpi k-out"><div class="t">Missing Fingerprint</div><div class="v" id="kMissing">0</div></div>
+    <div class="card kpi k-ot"><div class="t">Overtime Holiday / OT</div><div class="v" id="kOT">0</div></div>
+    <div class="card kpi k-ctl"><div class="t">Controlled</div><div class="v" id="kControlled">0</div></div>
+  </div>
+
+  <div class="filters">
+    <input id="search" placeholder="Cari Posisi / Hari / Tanggal / Shift...">
+    <select id="statusFilter">
+      <option value="">Semua Status Control</option>
+      <option value="Needs Review">Needs Review</option>
+      <option value="Controlled">Controlled</option>
+    </select>
+    <select id="issueFilter">
+      <option value="">Semua Issue</option>
+      <option value="Overtime Holiday">Overtime Holiday</option>
+      <option value="Shift Mismatch">Shift Mismatch</option>
+      <option value="Missing Fingerprint">Missing Fingerprint</option>
+      <option value="Possible Overtime">Possible Overtime</option>
+      <option value="No Issue">No Issue</option>
+    </select>
+    <button class="btn light" id="showOnlySuggested">Show Issues Only</button>
+    <button class="btn purple admin-only" id="btnAutoCorrectAll">✨ Koreksi Otomatis Semua Data</button>
+    <button class="btn green admin-only" id="applyVisible">✓ Apply Adjustment (Visible)</button>
+    <button class="btn dark admin-only" id="exportBtn" style="margin-left:auto">📥 Export Data Revisi (Excel)</button>
+  </div>
+
+  <div class="table-card">
+    <div class="table-head">
+      <div>
+        <h2>Attendance Control Queue</h2>
+        <div class="muted">Ubah Actual Date/Time In/Out manual lalu tekan <b>ENTER</b>. Kode Shift & Deskripsi akan otomatis menyesuaikan!</div>
+      </div>
+      <div class="muted" id="countText">0 records</div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th rowspan="2">Day</th>
+            <th rowspan="2">Date</th>
+            <th rowspan="2">Position</th>
+            <th colspan="5" class="group-header-plan">Planned Schedule</th>
+            <th colspan="4" class="group-header-finger">Fingerprint Data</th>
+            <th colspan="6" class="group-header-act">Actual (Correction / Result)</th>
+            <th rowspan="2">Detected Issue</th>
+            <th rowspan="2">Control Status</th>
+            <th rowspan="2" class="admin-only">Action</th>
+          </tr>
+          <tr>
+            <th class="group-header-plan">Planned Shift</th>
+            <th class="group-header-plan">Planned Date In</th>
+            <th class="group-header-plan">Planned Time In</th>
+            <th class="group-header-plan">Planned Date Out</th>
+            <th class="group-header-plan">Planned Time Out</th>
+            <th class="group-header-finger">Finger Date In</th>
+            <th class="group-header-finger">Finger Time In</th>
+            <th class="group-header-finger">Finger Date Out</th>
+            <th class="group-header-finger">Finger Time Out</th>
+            <th class="group-header-act">Actual Shift Code</th>
+            <th class="group-header-act">Shift Description</th>
+            <th class="group-header-act">Actual Date In</th>
+            <th class="group-header-act">Actual Time In</th>
+            <th class="group-header-act">Actual Date Out</th>
+            <th class="group-header-act">Actual Time Out</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="text-align:center;color:#94a3b8;font-size:11px;margin-top:20px">
+    Attendance Correction & Control • Version 4.2 Integrated Engine
+  </div>
+</div>
+
+<div id="toast" class="toast">Action logged successfully</div>
+
+<script>
+let adminPasswordState = "Valrezy14";
+let userPasswordState = "user123";
+
+// Embedded 314 Master Shift Array
+const EMBEDDED_MASTER = [
+  {"code": "OFF", "desc": "Day Off", "start": "06:00", "end": "19:00"},
+  {"code": "H195BOFF", "desc": "Hari Libur 19.30 - 03.30", "start": "19:30", "end": "03:30"},
+  {"code": "HK105A", "desc": "Hari Kerja  10.30 - 20.00", "start": "10:30", "end": "20:00"},
+  {"code": "HK105AOFF", "desc": "Hari Libur  10.30 - 20.00", "start": "10:30", "end": "20:00"},
+  {"code": "HK10A", "desc": "Hari Kerja  10.00 - 15.00", "start": "10:00", "end": "15:00"},
+  {"code": "HK10AOFF", "desc": "Hari Libur  10.00 - 15.00", "start": "10:00", "end": "15:00"},
+  {"code": "HK10B", "desc": "Hari Kerja  10.00 - 16.00", "start": "10:00", "end": "16:00"},
+  {"code": "HK10BOFF", "desc": "Hari Libur  10.00 - 16.00", "start": "10:00", "end": "16:00"},
+  {"code": "HK10C", "desc": "Hari Kerja  10.00 - 18.00", "start": "10:00", "end": "18:00"},
+  {"code": "HK10C1", "desc": "Hari Kerja  10.00 - 18.00", "start": "10:00", "end": "18:00"},
+  {"code": "HK10C1OFF", "desc": "Hari Libur  10.00 - 18.00", "start": "10:00", "end": "18:00"},
+  {"code": "HK10COFF", "desc": "Hari Libur  10.00 - 18.00", "start": "10:00", "end": "18:00"},
+  {"code": "HK10D", "desc": "Hari Kerja  10.00 - 19.00", "start": "10:00", "end": "19:00"},
+  {"code": "HK10D1", "desc": "Hari Kerja  10.00 - 19.00", "start": "10:00", "end": "19:00"},
+  {"code": "HK10D1OFF", "desc": "Hari Libur  10.00 - 19.00", "start": "10:00", "end": "19:00"},
+  {"code": "HK10DOFF", "desc": "Hari Libur  10.00 - 19.00", "start": "10:00", "end": "19:00"},
+  {"code": "HK10E", "desc": "Hari Kerja  10.00 - 20.00", "start": "10:00", "end": "20:00"},
+  {"code": "HK10EOFF", "desc": "Hari Libur  10.00 - 20.00", "start": "10:00", "end": "20:00"},
+  {"code": "HK10F", "desc": "Hari Kerja  10.00 - 20.30", "start": "10:00", "end": "20:30"},
+  {"code": "HK10FOFF", "desc": "Hari Libur  10.00 - 20.30", "start": "10:00", "end": "20:30"},
+  {"code": "HK10G", "desc": "Hari Kerja  10.00 - 17.00", "start": "10:00", "end": "17:00"},
+  {"code": "HK10GOFF", "desc": "Hari Libur  10.00 - 17.00", "start": "10:00", "end": "17:00"},
+  {"code": "HK11A", "desc": "Hari Kerja  11.00 - 17.00", "start": "11:00", "end": "17:00"},
+  {"code": "HK11AOFF", "desc": "Hari Libur  11.00 - 17.00", "start": "11:00", "end": "17:00"},
+  {"code": "HK11B", "desc": "Hari Kerja  11.00 - 19.00", "start": "11:00", "end": "19:00"},
+  {"code": "HK11BOFF", "desc": "Hari Libur  11.00 - 19.00", "start": "11:00", "end": "19:00"},
+  {"code": "HK11C", "desc": "Hari Kerja  11.00 - 20.00", "start": "11:00", "end": "20:00"},
+  {"code": "HK11COFF", "desc": "Hari Libur  11.00 - 20.00", "start": "11:00", "end": "20:00"},
+  {"code": "HK11D", "desc": "Hari Kerja 11.00 - 21.00", "start": "11:00", "end": "21:00"},
+  {"code": "HK11DOFF", "desc": "Hari Libur 11.00 - 21.00", "start": "11:00", "end": "21:00"},
+  {"code": "HK123A", "desc": "Hari Kerja 12.30 - 21.30", "start": "12:30", "end": "21:30"},
+  {"code": "HK123AOFF", "desc": "Hari Libur 12.30 - 21.30", "start": "12:30", "end": "21:30"},
+  {"code": "HK125A", "desc": "Hari Kerja  12.30 - 16.30", "start": "12:30", "end": "16:30"},
+  {"code": "HK125AOFF", "desc": "Hari Libur  12.30 - 16.30", "start": "12:30", "end": "16:30"},
+  {"code": "HK125B", "desc": "Hari Kerja  12.30 - 17.30", "start": "12:30", "end": "17:30"},
+  {"code": "HK125BOFF", "desc": "Hari Libur 12:30 - 17:30", "start": "12:30", "end": "17:30"},
+  {"code": "HK12A", "desc": "Hari Kerja  12.00 - 20.00", "start": "12:00", "end": "20:00"},
+  {"code": "HK12AOFF", "desc": "Hari Libur  12.00 - 20.00", "start": "12:00", "end": "20:00"},
+  {"code": "HK12B", "desc": "Hari Kerja  12.00 - 21.00", "start": "12:00", "end": "21:00"},
+  {"code": "HK12BOFF", "desc": "Hari Libur  12.00 - 21.00", "start": "12:00", "end": "21:00"},
+  {"code": "HK12C", "desc": "Hari Kerja  12.00 - 22.00", "start": "12:00", "end": "22:00"},
+  {"code": "HK12COFF", "desc": "Hari Libur  12.00 - 22.00", "start": "12:00", "end": "22:00"},
+  {"code": "HK13A", "desc": "Hari Kerja  13.00 - 21.00", "start": "13:00", "end": "21:00"},
+  {"code": "HK13AOFF", "desc": "Hari Libur  13.00 - 21.00", "start": "13:00", "end": "21:00"},
+  {"code": "HK13B", "desc": "Hari Kerja  13.00 - 21.30", "start": "13:00", "end": "21:30"},
+  {"code": "HK13BOFF", "desc": "Hari Libur  13.00 - 21.30", "start": "13:00", "end": "21:30"},
+  {"code": "HK13C", "desc": "Hari Kerja  13.00 - 22.00", "start": "13:00", "end": "22:00"},
+  {"code": "HK13COFF", "desc": "Hari Libur  13.00 - 22.00", "start": "13:00", "end": "22:00"},
+  {"code": "HK13D", "desc": "Hari Kerja 13.00 - 18.00", "start": "13:00", "end": "18:00"},
+  {"code": "HK13DOFF", "desc": "Hari Libur 13.00 - 18.00", "start": "13:00", "end": "18:00"},
+  {"code": "HK14A", "desc": "Hari Kerja  14.00 - 22.00", "start": "14:00", "end": "22:00"},
+  {"code": "HK14AOFF", "desc": "Hari Libur  14.00 - 22.00", "start": "14:00", "end": "22:00"},
+  {"code": "HK14B", "desc": "Hari Kerja  14.00 - 22.30", "start": "14:00", "end": "22:30"},
+  {"code": "HK14BOFF", "desc": "Hari Libur  14.00 - 22.30", "start": "14:00", "end": "22:30"},
+  {"code": "HK14C", "desc": "Hari Kerja  14.00 - 23.00", "start": "14:00", "end": "23:00"},
+  {"code": "HK14COFF", "desc": "Hari Libur  14.00 - 23.00", "start": "14:00", "end": "23:00"},
+  {"code": "HK15A", "desc": "Hari Kerja  15.00 - 23.00", "start": "15:00", "end": "23:00"},
+  {"code": "HK15AOFF", "desc": "Hari Libur  15.00 - 23.00", "start": "15:00", "end": "23:00"},
+  {"code": "HK15B", "desc": "Hari Kerja  15.00 - 23.30", "start": "15:00", "end": "23:30"},
+  {"code": "HK15BOFF", "desc": "Hari Libur  15.00 - 23.30", "start": "15:00", "end": "23:30"},
+  {"code": "HK15C", "desc": "Hari Kerja 15.00 - 00.00", "start": "15:00", "end": "00:00"},
+  {"code": "HK15COFF", "desc": "Hari Libur 15.00 - 00.00", "start": "15:00", "end": "00:00"},
+  {"code": "HK165A", "desc": "Hari Kerja  16.30 - 00.30", "start": "16:30", "end": "00:30"},
+  {"code": "HK165AOFF", "desc": "Hari Libur  16.30 - 00.30", "start": "16:30", "end": "00:30"},
+  {"code": "HK16A", "desc": "Hari Kerja  16.00 - 00.00", "start": "16:00", "end": "00:00"},
+  {"code": "HK16AOFF", "desc": "Hari Libur  16.00 - 00.00", "start": "16:00", "end": "00:00"},
+  {"code": "HK17A", "desc": "Hari Kerja 17.00 - 01.00", "start": "17:00", "end": "01:00"},
+  {"code": "HK17AOFF", "desc": "Hari Libur 17.00 - 01.00", "start": "17:00", "end": "01:00"},
+  {"code": "HK18A", "desc": "Hari Kerja 18.00 - 02.00", "start": "18:00", "end": "02:00"},
+  {"code": "HK18AOFF", "desc": "Hari Libur 18.00 - 02.00", "start": "18:00", "end": "02:00"},
+  {"code": "HK195A", "desc": "Hari Kerja 19.30 - 03.30", "start": "19:30", "end": "03:30"},
+  {"code": "HK195AOFF", "desc": "Hari Libur 19.30 - 03.30", "start": "19:30", "end": "03:30"},
+  {"code": "HK195B", "desc": "Hari Kerja 19.30 - 03.30", "start": "19:30", "end": "03:30"},
+  {"code": "HK19A", "desc": "Hari Kerja 19.00 - 03.00", "start": "19:00", "end": "03:00"},
+  {"code": "HK19AOFF", "desc": "Hari Libur 19.00 - 03.00", "start": "19:00", "end": "03:00"},
+  {"code": "HK20A", "desc": "Hari Kerja  20.00 - 04.00", "start": "20:00", "end": "04:00"},
+  {"code": "HK20AOFF", "desc": "Hari Libur  20.00 - 04.00", "start": "20:00", "end": "04:00"},
+  {"code": "HK21A", "desc": "Hari Kerja  21.00 - 05.00", "start": "21:00", "end": "05:00"},
+  {"code": "HK21AOFF", "desc": "Hari Libur  21.00 - 05.00", "start": "21:00", "end": "05:00"},
+  {"code": "HK22A", "desc": "Hari Kerja  22.00 - 06.00", "start": "22:00", "end": "06:00"},
+  {"code": "HK22AOFF", "desc": "Hari Libur  22.00 - 06.00", "start": "22:00", "end": "06:00"},
+  {"code": "HK23A", "desc": "Hari Kerja  23.00 - 07.00", "start": "23:00", "end": "07:00"},
+  {"code": "HK23AOFF", "desc": "Hari Libur  23.00 - 07.00", "start": "23:00", "end": "07:00"},
+  {"code": "HK6A", "desc": "Hari Kerja  06.00 - 14.00", "start": "06:00", "end": "14:00"},
+  {"code": "HK6AOFF", "desc": "Hari Libur  06.00 - 14.00", "start": "06:00", "end": "14:00"},
+  {"code": "HK6B", "desc": "Hari Kerja  06.00 - 15.00", "start": "06:00", "end": "15:00"},
+  {"code": "HK6BOFF", "desc": "Hari Libur  06.00 - 15.00", "start": "06:00", "end": "15:00"},
+  {"code": "HK6C", "desc": "Hari Kerja 06.00 - 19.00", "start": "06:00", "end": "19:00"},
+  {"code": "HK6COFF", "desc": "Hari Libur 06.00 - 19.00", "start": "06:00", "end": "19:00"},
+  {"code": "HK7A", "desc": "Hari Kerja  07.00 - 12.00", "start": "07:00", "end": "12:00"},
+  {"code": "HK7AOFF", "desc": "Hari Libur  07.00 - 12.00", "start": "07:00", "end": "12:00"},
+  {"code": "HK7B", "desc": "Hari Kerja  07.00 - 15.00", "start": "07:00", "end": "15:00"},
+  {"code": "HK7BOFF", "desc": "Hari Libur  07.00 - 15.00", "start": "07:00", "end": "15:00"},
+  {"code": "HK7C", "desc": "Hari Kerja  07.00 - 15.30", "start": "07:00", "end": "15:30"},
+  {"code": "HK7COFF", "desc": "Hari Libur  07.00 - 15.30", "start": "07:00", "end": "15:30"},
+  {"code": "HK7D", "desc": "Hari Kerja  07.00 - 16.00", "start": "07:00", "end": "16:00"},
+  {"code": "HK7DOFF", "desc": "Hari Libur  07.00 - 16.00", "start": "07:00", "end": "16:00"},
+  {"code": "HK7E", "desc": "Hari Kerja  07.00 - 17.00", "start": "07:00", "end": "17:00"},
+  {"code": "HK7EOFF", "desc": "Hari Libur  07.00 - 17.00", "start": "07:00", "end": "17:00"},
+  {"code": "HK7F", "desc": "Hari Kerja 07.00 - 20.00", "start": "07:00", "end": "20:00"},
+  {"code": "HK7FOFF", "desc": "Hari Libur 07.00 - 20.00", "start": "07:00", "end": "20:00"},
+  {"code": "HK845A", "desc": "Hari Kerja  08.45 - 17.00", "start": "08:45", "end": "17:00"},
+  {"code": "HK845AOFF", "desc": "Hari Libur  08.45 - 17.00", "start": "08:45", "end": "17:00"},
+  {"code": "HK845B", "desc": "Hari Kerja  08.45 - 12.30", "start": "08:45", "end": "12:30"},
+  {"code": "HK845BOFF", "desc": "Hari Libur  08.45 - 12.30", "start": "08:45", "end": "12:30"},
+  {"code": "HK85A", "desc": "Hari Kerja  08.30 - 12.30", "start": "08:30", "end": "12:30"},
+  {"code": "HK85AOFF", "desc": "Hari Libur  08.30 - 12.30", "start": "08:30", "end": "12:30"},
+  {"code": "HK85B", "desc": "Hari Kerja  08.30 - 14.30", "start": "08:30", "end": "14:30"},
+  {"code": "HK85BOFF", "desc": "Hari Libur  08.30 - 14.30", "start": "08:30", "end": "14:30"},
+  {"code": "HK85C", "desc": "Hari Kerja  08.30 - 16.30", "start": "08:30", "end": "16:30"},
+  {"code": "HK85COFF", "desc": "Hari Libur  08.30 - 16.30", "start": "08:30", "end": "16:30"},
+  {"code": "HK85D", "desc": "Hari Kerja  08.30 - 17.00", "start": "08:30", "end": "17:00"},
+  {"code": "HK85DOFF", "desc": "Hari Libur  08.30 - 17.00", "start": "08:30", "end": "17:00"},
+  {"code": "HK85E", "desc": "Hari Kerja  08.30 - 17.30", "start": "08:30", "end": "17:30"},
+  {"code": "HK85EOFF", "desc": "Hari Libur  08.30 - 17.30", "start": "08:30", "end": "17:30"},
+  {"code": "HK85F", "desc": "Hari Kerja  08.30 - 18.00", "start": "08:30", "end": "18:00"},
+  {"code": "HK85FOFF", "desc": "Hari Libur  08.30 - 18.00", "start": "08:30", "end": "18:00"},
+  {"code": "HK85G", "desc": "Hari Kerja  08.30 - 18.30", "start": "08:30", "end": "18:30"},
+  {"code": "HK85GOFF", "desc": "Hari Libur  08.30 - 18.30", "start": "08:30", "end": "18:30"},
+  {"code": "HK85H", "desc": "Hari Kerja 08.30 - 21.30", "start": "08:30", "end": "21:30"},
+  {"code": "HK85HOFF", "desc": "Hari Libur 08.30 - 21.30", "start": "08:30", "end": "21:30"},
+  {"code": "HK85I", "desc": "Hari Kerja 08.30 - 13.30", "start": "08:30", "end": "13:30"},
+  {"code": "HK85IOFF", "desc": "Hari Libur 08.30 - 13.30", "start": "08:30", "end": "13:30"},
+  {"code": "HK8A", "desc": "Hari Kerja  08.00 - 12.00", "start": "08:00", "end": "12:00"},
+  {"code": "HK8AOFF", "desc": "Hari Libur  08.00 - 12.00", "start": "08:00", "end": "12:00"},
+  {"code": "HK8B", "desc": "Hari Kerja  08.00 - 13.00", "start": "08:00", "end": "13:00"},
+  {"code": "HK8BOFF", "desc": "Hari Libur  08.00 - 13.00", "start": "08:00", "end": "13:00"},
+  {"code": "HK8C", "desc": "Hari Kerja  08.00 - 15.00", "start": "08:00", "end": "15:00"},
+  {"code": "HK8COFF", "desc": "Hari Libur  08.00 - 15.00", "start": "08:00", "end": "15:00"},
+  {"code": "HK8D", "desc": "Hari Kerja  08.00 - 16.00", "start": "08:00", "end": "16:00"},
+  {"code": "HK8DOFF", "desc": "Hari Libur  08.00 - 16.00", "start": "08:00", "end": "16:00"},
+  {"code": "HK8E", "desc": "Hari Kerja  08.00 - 17.00", "start": "08:00", "end": "17:00"},
+  {"code": "HK8EOFF", "desc": "Hari Libur  08.00 - 17.00", "start": "08:00", "end": "17:00"},
+  {"code": "HK8F", "desc": "Hari Kerja  08.00 - 18.00", "start": "08:00", "end": "18:00"},
+  {"code": "HK8FOFF", "desc": "Hari Libur  08.00 - 18.00", "start": "08:00", "end": "18:00"},
+  {"code": "HK8G", "desc": "Hari Kerja  08.00 - 20.00", "start": "08:00", "end": "20:00"},
+  {"code": "HK8GOFF", "desc": "Hari Libur  08.00 - 20.00", "start": "08:00", "end": "20:00"},
+  {"code": "HK8H", "desc": "Hari Kerja 08.00 - 21.00", "start": "08:00", "end": "21:00"},
+  {"code": "HK8HOFF", "desc": "Hari Libur 08.00 - 21.00", "start": "08:00", "end": "21:00"},
+  {"code": "HK8I", "desc": "Hari Kerja 08.00 - 14.00", "start": "08:00", "end": "14:00"},
+  {"code": "HK8IOFF", "desc": "Hari Libur 08.00 - 14.00", "start": "08:00", "end": "14:00"},
+  {"code": "HK95A", "desc": "Hari Kerja  09.30 - 17.30", "start": "09:30", "end": "17:30"},
+  {"code": "HK95AOFF", "desc": "Hari Libur  09.30 - 17.30", "start": "09:30", "end": "17:30"},
+  {"code": "HK95B", "desc": "Hari Kerja  09.30 - 18.30", "start": "09:30", "end": "18:30"},
+  {"code": "HK95BOFF", "desc": "Hari Libur  09.30 - 18.30", "start": "09:30", "end": "18:30"},
+  {"code": "HK95C", "desc": "Hari Kerja  09.30 - 19.30", "start": "09:30", "end": "19:30"},
+  {"code": "HK95COFF", "desc": "Hari Libur  09.30 - 19.30", "start": "09:30", "end": "19:30"},
+  {"code": "HK9A", "desc": "Hari Kerja  09.00 - 14.00", "start": "09:00", "end": "14:00"},
+  {"code": "HK9AOFF", "desc": "Hari Libur  09.00 - 14.00", "start": "09:00", "end": "14:00"},
+  {"code": "HK9B", "desc": "Hari Kerja  09.00 - 15.00", "start": "09:00", "end": "15:00"},
+  {"code": "HK9BOFF", "desc": "Hari Libur  09.00 - 15.00", "start": "09:00", "end": "15:00"},
+  {"code": "HK9C", "desc": "Hari Kerja  09.00 - 17.00", "start": "09:00", "end": "17:00"},
+  {"code": "HK9COFF", "desc": "Hari Libur  09.00 - 17.00", "start": "09:00", "end": "17:00"},
+  {"code": "HK9D", "desc": "Hari Kerja  09.00 - 18.00", "start": "09:00", "end": "18:00"},
+  {"code": "HK9DOFF", "desc": "Hari Libur  09.00 - 18.00", "start": "09:00", "end": "18:00"},
+  {"code": "HK9E", "desc": "Hari Kerja  09.00 - 19.00", "start": "09:00", "end": "19:00"},
+  {"code": "HK9EOFF", "desc": "Hari Libur  09.00 - 19.00", "start": "09:00", "end": "19:00"},
+  {"code": "HK9F", "desc": "Hari Kerja  09.00 - 16.00", "start": "09:00", "end": "16:00"},
+  {"code": "HK9FOFF", "desc": "Hari Libur  09.00 - 16.00", "start": "09:00", "end": "16:00"}
+];
+
+// Demo dataset reference
+const DEMO_DATASET = [
+  { Day: 'Saturday', Date: '01-08-2026', Position: 'Forklift Driver', PlannedShift: 'OFF', PlannedDateIn: '01-08-2026', PlannedTimeIn: '06:00', PlannedDateOut: '01-08-2026', PlannedTimeOut: '19:00', FingerDateIn: '01-08-2026', FingerTimeIn: '08:30', FingerDateOut: '01-08-2026', FingerTimeOut: '13:30', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Sunday', Date: '02-08-2026', Position: 'Forklift Driver', PlannedShift: 'HK7A', PlannedDateIn: '02-08-2026', PlannedTimeIn: '07:00', PlannedDateOut: '02-08-2026', PlannedTimeOut: '12:00', FingerDateIn: '', FingerTimeIn: '', FingerDateOut: '', FingerTimeOut: '', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Monday', Date: '03-08-2026', Position: 'Forklift Driver', PlannedShift: 'HK85E', PlannedDateIn: '03-08-2026', PlannedTimeIn: '08:30', PlannedDateOut: '03-08-2026', PlannedTimeOut: '17:30', FingerDateIn: '03-08-2026', FingerTimeIn: '08:28', FingerDateOut: '03-08-2026', FingerTimeOut: '17:33', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Tuesday', Date: '04-08-2026', Position: 'Warehouse Staff', PlannedShift: 'HK8A', PlannedDateIn: '04-08-2026', PlannedTimeIn: '08:00', PlannedDateOut: '04-08-2026', PlannedTimeOut: '12:00', FingerDateIn: '04-08-2026', FingerTimeIn: '08:00', FingerDateOut: '04-08-2026', FingerTimeOut: '17:00', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' },
+  { Day: 'Wednesday', Date: '05-08-2026', Position: 'Logistics Lead', PlannedShift: 'HK14A', PlannedDateIn: '05-08-2026', PlannedTimeIn: '14:00', PlannedDateOut: '05-08-2026', PlannedTimeOut: '22:00', FingerDateIn: '05-08-2026', FingerTimeIn: '13:55', FingerDateOut: '05-08-2026', FingerTimeOut: '22:05', ManualShiftCode: '', ActualDateIn: '', ActualTimeIn: '', ActualDateOut: '', ActualTimeOut: '' }
+];
+
+let currentUserRole = null; 
+let master = [];
+let rows = [];
+let onlySuggested = false;
+
+function parseTime(s){
+  if(s==null||s==='') return null;
+  let x = String(s).trim().toLowerCase().replace(/\s/g,'').replace('.',':');
+  if(x==='24:00'||x==='24:00:00') return 1440;
+  let m = x.match(/^(\d{1,2})(?::(\d{1,2}))?(?::(\d{1,2}))?(?:am|pm)?$/);
+  if(!m){
+    let d = new Date(s);
+    if(!isNaN(d)) return d.getHours()*60 + d.getMinutes();
+    return null;
+  }
+  let h = +m[1], mi = +(m[2]||0);
+  if(x.includes('pm') && h<12) h += 12;
+  if(x.includes('am') && h===12) h = 0;
+  return h*60 + mi;
+}
+
+function fmtMin(min){
+  if(min==null || isNaN(min)) return '';
+  let m = ((Math.round(min)%1440)+1440)%1440;
+  return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
+}
+
+function parseShift(desc){
+  let m = String(desc).match(/(\d{1,2}(?::|\.)\d{2})\s*-\s*(\d{1,2}(?::|\.)\d{2})/);
+  if(!m) return null;
+  let a = parseTime(m[1]), b = parseTime(m[2]);
+  if(a==null || b==null) return null;
+  let cross = b <= a;
+  let duration = cross ? (1440 - a + b) : (b - a);
+  return { start: a, end: b, cross: cross, duration: duration, desc: String(desc) };
+}
+
+function prepMaster(list){
+  master = list.map(x => {
+    let p = parseShift(x.desc || x.code || '');
+    let sStr = x.start || (p ? fmtMin(p.start) : '');
+    let eStr = x.end || (p ? fmtMin(p.end) : '');
+    let startMin = parseTime(sStr);
+    let endMin = parseTime(eStr);
+    let cross = (startMin != null && endMin != null) ? endMin <= startMin : false;
+    let duration = (startMin != null && endMin != null) ? (cross ? (1440 - startMin + endMin) : (endMin - startMin)) : 0;
+
+    return { 
+      code: x.code || '', 
+      desc: x.desc || x.code || '',
+      start: sStr,
+      end: eStr,
+      startMin: startMin,
+      endMin: endMin,
+      cross: cross,
+      duration: duration
+    };
+  });
+  document.getElementById('masterCount').textContent = master.length;
+}
+
+function shiftByCode(code){
+  let c = String(code||'').trim().toLowerCase();
+  return master.find(m => m.code.toLowerCase() === c) || null;
+}
+
+function addDays(dateStr, days){
+  if(!dateStr) return '';
+  let parts = dateStr.split('-');
+  if(parts.length !== 3) return dateStr;
+  let d = new Date(parts[2], parts[1]-1, parts[0]);
+  d.setDate(d.getDate() + days);
+  let dd = String(d.getDate()).padStart(2,'0');
+  let mm = String(d.getMonth()+1).padStart(2,'0');
+  let yyyy = d.getFullYear();
+  return `${dd}-${mm}-${yyyy}`;
+}
+
+function isSaturday(dayStr, dateStr){
+  let d = (dayStr || '').toLowerCase();
+  if(d.includes('sat') || d.includes('sab')) return true;
+  if(dateStr){
+    let p = dateStr.split('-');
+    if(p.length === 3){
+      let dt = p[2].length === 4 ? new Date(p[2], p[1]-1, p[0]) : new Date(p[0], p[1]-1, p[2]);
+      if(!isNaN(dt) && dt.getDay() === 6) return true;
+    }
+  }
+  return false;
+}
+
+function findBestShiftForTime(tIn, tOut, isSat){
+  let inMin = parseTime(tIn);
+  let outMin = parseTime(tOut);
+  if(inMin == null && outMin == null) return null;
+
+  let actDur = (inMin != null && outMin != null) ? (outMin < inMin ? (1440 - inMin + outMin) : (outMin - inMin)) : null;
+
+  let bestMatch = null;
+  let bestScore = Infinity;
+
+  master.forEach(m => {
+    if(m.code.endsWith('OFF') || m.code === 'OFF') return;
+    if(m.startMin == null || m.endMin == null) return;
+
+    let score = 0;
+    if(inMin != null){
+      let diffIn = Math.abs(inMin - m.startMin);
+      if(diffIn > 720) diffIn = 1440 - diffIn;
+      score += diffIn * 2.0;
+    }
+
+    if(outMin != null){
+      let diffOut = Math.abs(outMin - m.endMin);
+      if(diffOut > 720) diffOut = 1440 - diffOut;
+      score += diffOut * 1.5;
+    }
+
+    if(actDur != null){
+      let diffDur = Math.abs(actDur - m.duration);
+      score += diffDur * 1.0;
+    }
+
+    if(score < bestScore){
+      bestScore = score;
+      bestMatch = m;
+    }
+  });
+
+  return bestMatch;
+}
+
+function recommendShift(r){
+  if(r.ManualShiftCode){
+    let m = shiftByCode(r.ManualShiftCode);
+    if(m) return m;
+  }
+
+  let fin = parseTime(r.ActualTimeIn || r.FingerTimeIn);
+  let fout = parseTime(r.ActualTimeOut || r.FingerTimeOut);
+  let actDur = (fin != null && fout != null) ? (fout < fin ? (1440 - fin + fout) : (fout - fin)) : null;
+
+  let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
+  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+
+  if(fin == null && fout == null && isPlannedOff){
+    return shiftByCode('OFF') || { code: 'OFF', desc: 'Day Off', start: '06:00', end: '19:00', cross: false, duration: 780 };
+  }
+
+  if(fin == null && fout == null && !isPlannedOff){
+    let m = master.find(x => x.code.toLowerCase() === (r.PlannedShift||'').toLowerCase() || x.desc.toLowerCase().includes((r.PlannedShift||'').toLowerCase()));
+    if(m) return m;
+  }
+
+  let bestMatch = null;
+  let bestScore = Infinity;
+
+  master.forEach(m => {
+    if(m.code.endsWith('OFF') || m.code === 'OFF') return;
+    if(m.startMin == null || m.endMin == null) return;
+
+    let score = 0;
+    if(fin != null){
+      let diffIn = Math.abs(fin - m.startMin);
+      if(diffIn > 720) diffIn = 1440 - diffIn;
+      score += diffIn * 1.5;
+    }
+
+    if(actDur != null){
+      let diffDur = Math.abs(actDur - m.duration);
+      score += diffDur * 1.0;
+    }
+
+    if(isSat){
+      if(m.duration >= 240 && m.duration <= 390){
+        score -= 150;
+      } else {
+        score += 200;
+      }
+    } else {
+      if(m.duration >= 450 && m.duration <= 600){
+        score -= 100;
+      }
+    }
+
+    if(score < bestScore){
+      bestScore = score;
+      bestMatch = m;
+    }
+  });
+
+  return bestMatch || (shiftByCode('OFF') || master[0]);
+}
+
+function analyze(r){
+  let matchedShift = recommendShift(r);
+
+  r.ActualShiftCode = r.ManualShiftCode || (matchedShift ? matchedShift.code : 'OFF');
+  
+  if(!r.ManualShiftDescFlag){
+    r.ActualShiftDesc = matchedShift ? matchedShift.desc : (r.ActualShiftDesc || 'Day Off');
+  }
+
+  if(!r.ActualDateIn) r.ActualDateIn = r.FingerDateIn || r.PlannedDateIn || r.Date;
+  if(!r.ActualTimeIn) r.ActualTimeIn = r.FingerTimeIn || r.PlannedTimeIn || (matchedShift ? matchedShift.start : '');
+
+  if(!r.ActualTimeOut){
+    if(r.FingerTimeOut){
+      r.ActualTimeOut = r.FingerTimeOut;
+      r.ActualDateOut = r.FingerDateOut || r.ActualDateIn;
+    } else if(matchedShift && matchedShift.end){
+      r.ActualTimeOut = matchedShift.end;
+      r.ActualDateOut = matchedShift.cross ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
+    }
+  } else if(!r.ActualDateOut || r.ManualShiftCode){
+    r.ActualDateOut = (matchedShift && matchedShift.cross) ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
+  }
+
+  let issues = [];
+  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+  let fingerIn = parseTime(r.FingerTimeIn);
+  let fingerOut = parseTime(r.FingerTimeOut);
+
+  if(isPlannedOff && (fingerIn != null || fingerOut != null || r.ActualShiftCode !== 'OFF')){
+    issues.push('Overtime Holiday');
+  }
+
+  if(!isPlannedOff && fingerIn == null && fingerOut == null && !r.UserModifiedTime){
+    issues.push('Missing Fingerprint');
+  }
+
+  if(!isPlannedOff && r.PlannedShift && r.PlannedShift !== r.ActualShiftCode){
+    issues.push('Shift Mismatch');
+  }
+
+  let actInMin = parseTime(r.ActualTimeIn);
+  let actOutMin = parseTime(r.ActualTimeOut);
+  if(!isPlannedOff && actInMin != null && actOutMin != null && matchedShift && matchedShift.duration > 0){
+    let actDur = actOutMin < actInMin ? (1440 - actInMin + actOutMin) : (actOutMin - actInMin);
+    if(actDur - matchedShift.duration >= 120){
+      issues.push('Possible Overtime');
+    }
+  }
+
+  r.Issue = issues.join(' + ') || 'No Issue';
+  return r;
+}
+
+function render(){
+  rows.forEach(analyze);
+  let data = filteredData();
+
+  let mismatchCount = rows.filter(r => r.Issue.includes('Shift Mismatch')).length;
+  let missingCount = rows.filter(r => r.Issue.includes('Missing Fingerprint')).length;
+  let otCount = rows.filter(r => r.Issue.includes('Overtime Holiday') || r.Issue.includes('Possible Overtime')).length;
+  let ctlCount = rows.filter(r => r.ControlStatus === 'Controlled').length;
+
+  document.getElementById('kTotal').textContent = rows.length;
+  document.getElementById('kMismatch').textContent = mismatchCount;
+  document.getElementById('kMissing').textContent = missingCount;
+  document.getElementById('kOT').textContent = otCount;
+  document.getElementById('kControlled').textContent = ctlCount;
+  document.getElementById('countText').textContent = data.length + ' records';
+
+  let tbody = document.getElementById('tbody');
+  if(!data.length){
+    tbody.innerHTML = `<tr><td colspan="20" style="padding:40px;text-align:center;color:#94a3b8;font-size:14px"><b>Belum Ada Data Absensi Loaded.</b><br>Silakan Upload File Excel / CSV atau klik 'Load Reference Demo'.</td></tr>`;
+    return;
+  }
+
+  let isAdmin = currentUserRole === 'Admin';
+
+  tbody.innerHTML = data.map(r => {
+    let idx = rows.indexOf(r);
+    let isCtl = r.ControlStatus === 'Controlled';
+    
+    let badgeCls = 'bg-ok';
+    if(r.Issue.includes('Overtime Holiday')) badgeCls = 'bg-orange';
+    else if(r.Issue.includes('Mismatch')) badgeCls = 'bg-red';
+    else if(r.Issue.includes('Missing')) badgeCls = 'bg-yellow';
+    else if(r.Issue.includes('Overtime')) badgeCls = 'bg-purple';
+
+    let shiftOptions = master.map(m => `<option value="${m.code}" ${(r.ActualShiftCode===m.code)?'selected':''}>${m.code}</option>`).join('');
+
+    return `<tr>
+      <td><b>${esc(r.Day)}</b></td>
+      <td>${esc(r.Date)}</td>
+      <td><b>${esc(r.Position)}</b></td>
+      
+      <td>${esc(r.PlannedShift)}</td>
+      <td>${esc(r.PlannedDateIn)}</td>
+      <td>${esc(r.PlannedTimeIn)}</td>
+      <td>${esc(r.PlannedDateOut)}</td>
+      <td>${esc(r.PlannedTimeOut)}</td>
+
+      <td>${esc(r.FingerDateIn) || '—'}</td>
+      <td>${esc(r.FingerTimeIn) || '—'}</td>
+      <td>${esc(r.FingerDateOut) || '—'}</td>
+      <td>${esc(r.FingerTimeOut) || '—'}</td>
+
+      <td>
+        ${isAdmin ? `
+          <select class="cell-select" onchange="setManualShiftCode(${idx}, this.value)">
+            ${shiftOptions}
+          </select>
+        ` : `<b>${esc(r.ActualShiftCode)}</b>`}
+      </td>
+      <td>
+        ${isAdmin ? `<input class="cell-input cell-input-desc" value="${escAttr(r.ActualShiftDesc)}" placeholder="Shift Description..." onchange="setManualShiftDesc(${idx}, this.value)">` : esc(r.ActualShiftDesc)}
+      </td>
+      <td>
+        ${isAdmin ? `<input class="cell-input cell-input-date" value="${escAttr(r.ActualDateIn)}" onkeydown="handleInputKey(event, ${idx}, 'ActualDateIn', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualDateIn', this.value)">` : esc(r.ActualDateIn)}
+      </td>
+      <td>
+        ${isAdmin ? `<input class="cell-input cell-input-time" value="${escAttr(r.ActualTimeIn)}" placeholder="--:--" onkeydown="handleInputKey(event, ${idx}, 'ActualTimeIn', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualTimeIn', this.value)">` : esc(r.ActualTimeIn)}
+      </td>
+      <td>
+        ${isAdmin ? `<input class="cell-input cell-input-date" value="${escAttr(r.ActualDateOut)}" onkeydown="handleInputKey(event, ${idx}, 'ActualDateOut', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualDateOut', this.value)">` : esc(r.ActualDateOut)}
+      </td>
+      <td>
+        ${isAdmin ? `<input class="cell-input cell-input-time" value="${escAttr(r.ActualTimeOut)}" placeholder="--:--" onkeydown="handleInputKey(event, ${idx}, 'ActualTimeOut', this.value)" onchange="setFieldTimeDate(${idx}, 'ActualTimeOut', this.value)">` : esc(r.ActualTimeOut)}
+      </td>
+
+      <td><span class="badge ${badgeCls}">${esc(r.Issue)}</span></td>
+      <td>
+        ${isAdmin ? `
+          <select class="cell-select" onchange="setControl(${idx}, this.value)">
+            <option ${!isCtl ? 'selected':''}>Needs Review</option>
+            <option ${isCtl ? 'selected':''}>Controlled</option>
+          </select>
+        ` : `<b>${r.ControlStatus}</b>`}
+      </td>
+      ${isAdmin ? `
+        <td>
+          <button class="btn green" style="padding:4px 8px;font-size:10px" onclick="applySingle(${idx})">Apply</button>
+        </td>
+      ` : ''}
+    </tr>`;
+  }).join('');
+
+  updateRoleUI();
+}
+
+function handleInputKey(e, idx, field, val){
+  if(e.key === 'Enter'){
+    e.target.blur();
+    setFieldTimeDate(idx, field, val);
+  }
+}
+
+function filteredData(){
+  let q = document.getElementById('search').value.toLowerCase();
+  let st = document.getElementById('statusFilter').value;
+  let iss = document.getElementById('issueFilter').value;
+
+  return rows.filter(r => {
+    let matchQ = !q || r.Position.toLowerCase().includes(q) || r.Day.toLowerCase().includes(q) || r.Date.includes(q) || r.PlannedShift.toLowerCase().includes(q);
+    let matchSt = !st || r.ControlStatus === st;
+    let matchIss = !iss || r.Issue.includes(iss);
+    let matchSug = !onlySuggested || (r.Issue !== 'No Issue' && r.ControlStatus !== 'Controlled');
+    return matchQ && matchSt && matchIss && matchSug;
+  });
+}
+
+function setFieldTimeDate(idx, field, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx][field] = val;
+  rows[idx].UserModifiedTime = true;
+  rows[idx].ManualShiftCode = ''; 
+
+  let isSat = isSaturday(rows[idx].Day, rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
+  let bestMatch = findBestShiftForTime(rows[idx].ActualTimeIn, rows[idx].ActualTimeOut, isSat);
+  if(bestMatch){
+    rows[idx].ActualShiftCode = bestMatch.code;
+    rows[idx].ActualShiftDesc = bestMatch.desc;
+    rows[idx].ActualDateOut = bestMatch.cross ? addDays(rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date, 1) : (rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
+  }
+
+  rows[idx].ControlStatus = 'Controlled';
+  render();
+  toast('Jam/Tanggal diperbarui manual ➔ Shift Code & Deskripsi langsung disesuaikan!');
+}
+
+function setManualShiftCode(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ManualShiftCode = val;
+  rows[idx].ActualShiftCode = val;
+  rows[idx].UserModifiedTime = false;
+  
+  let m = shiftByCode(val);
+  if(m){
+    rows[idx].ActualShiftDesc = m.desc;
+    rows[idx].ManualShiftDescFlag = false;
+    if(m.start && !rows[idx].FingerTimeIn) rows[idx].ActualTimeIn = m.start;
+    if(m.end) rows[idx].ActualTimeOut = m.end;
+    rows[idx].ActualDateOut = m.cross ? addDays(rows[idx].ActualDateIn || rows[idx].Date, 1) : (rows[idx].ActualDateIn || rows[idx].Date);
+  }
+
+  render();
+  toast('Actual Shift Code & Description auto-updated');
+}
+
+function setManualShiftDesc(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ActualShiftDesc = val;
+  rows[idx].ManualShiftDescFlag = true;
+  render();
+  toast('Shift Description updated');
+}
+
+function setControl(idx, val){
+  if(currentUserRole !== 'Admin') return;
+  rows[idx].ControlStatus = val;
+  render();
+  toast('Status updated to ' + val);
+}
+
+function applySingle(idx){
+  if(currentUserRole !== 'Admin') return;
+  let r = rows[idx];
+
+  if(r.UserModifiedTime || (!r.ManualShiftCode && (r.ActualTimeIn || r.ActualTimeOut))){
+    let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
+    let best = findBestShiftForTime(r.ActualTimeIn || r.FingerTimeIn, r.ActualTimeOut || r.FingerTimeOut, isSat);
+    if(best){
+      r.ActualShiftCode = best.code;
+      r.ManualShiftCode = best.code;
+      if(!r.ManualShiftDescFlag) r.ActualShiftDesc = best.desc;
+      r.ActualDateOut = best.cross ? addDays(r.ActualDateIn || r.PlannedDateIn || r.Date, 1) : (r.ActualDateIn || r.PlannedDateIn || r.Date);
+    }
+  } else {
+    let m = shiftByCode(r.ManualShiftCode || r.ActualShiftCode);
+    if(m){
+      r.ActualShiftCode = m.code;
+      if(!r.ManualShiftDescFlag) r.ActualShiftDesc = m.desc;
+      if(!r.ActualTimeIn && m.start) r.ActualTimeIn = m.start;
+      if(m.end) r.ActualTimeOut = m.end;
+      r.ActualDateOut = m.cross ? addDays(r.ActualDateIn || r.Date, 1) : (r.ActualDateIn || r.Date);
+    }
+  }
+
+  r.ControlStatus = 'Controlled';
+  render();
+  toast('Shift Auto-Detected & Controlled');
+}
+
+function autoCorrectAll(){
+  if(currentUserRole !== 'Admin') return;
+  if(!rows.length){
+    toast('Tidak ada data untuk dikoreksi');
+    return;
+  }
+  rows.forEach((r, idx) => {
+    applySingle(idx);
+  });
+  render();
+  toast(`✨ Koreksi otomatis berhasil diterapkan ke seluruh (${rows.length}) data!`);
+}
+
+function applyVisible(){
+  if(currentUserRole !== 'Admin') return;
+  let vis = filteredData();
+  vis.forEach(r => {
+    let idx = rows.indexOf(r);
+    applySingle(idx);
+  });
+  render();
+  toast(`Applied auto-detection to ${vis.length} visible record(s)`);
+}
+
+function exportData(){
+  if(currentUserRole !== 'Admin'){
+    toast('Access Denied');
+    return;
+  }
+  if(!rows.length){
+    toast('Belum ada data untuk di-export');
+    return;
+  }
+  let out = rows.map(r => ({
+    'Day': r.Day,
+    'Date': r.Date,
+    'Position': r.Position,
+    'Planned Shift': r.PlannedShift,
+    'Planned Date In': r.PlannedDateIn,
+    'Planned Time In': r.PlannedTimeIn,
+    'Planned Date Out': r.PlannedDateOut,
+    'Planned Time Out': r.PlannedTimeOut,
+    'Finger Date In': r.FingerDateIn,
+    'Finger Time In': r.FingerTimeIn,
+    'Finger Date Out': r.FingerDateOut,
+    'Finger Time Out': r.FingerTimeOut,
+    'Actual Shift Code': r.ActualShiftCode,
+    'Actual Shift Description': r.ActualShiftDesc,
+    'Actual Date In': r.ActualDateIn,
+    'Actual Time In': r.ActualTimeIn,
+    'Actual Date Out': r.ActualDateOut,
+    'Actual Time Out': r.ActualTimeOut,
+    'Detected Issue': r.Issue,
+    'Control Status': r.ControlStatus
+  }));
+
+  let ws = XLSX.utils.json_to_sheet(out);
+  let wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Attendance Control");
+  XLSX.writeFile(wb, "Hasil_Koreksi_Absensi.xlsx");
+  toast('Export Excel berhasil!');
+}
+
+function setRole(role){
+  currentUserRole = role;
+  let badge = document.getElementById('roleBadge');
+  badge.textContent = 'Role: ' + role;
+  badge.className = 'badge-role ' + (role === 'Admin' ? 'badge-admin' : 'badge-user');
+
+  updateRoleUI();
+  document.getElementById('loginModal').classList.add('hidden');
+  toast('Logged in as ' + role);
+}
+
+function updateRoleUI(){
+  let isAdmin = currentUserRole === 'Admin';
+  document.querySelectorAll('.admin-only').forEach(el => {
+    if(!isAdmin) el.classList.add('hidden');
+    else el.classList.remove('hidden');
+  });
+
+  let masterLbl = document.getElementById('lblMasterInput');
+  let dataLbl = document.getElementById('lblDataInput');
+  let useEmbBtn = document.getElementById('useEmbedded');
+  let loadDemoBtn = document.getElementById('loadDemo');
+
+  if(!isAdmin){
+    masterLbl.classList.add('disabled');
+    dataLbl.classList.add('disabled');
+    useEmbBtn.disabled = true;
+    loadDemoBtn.disabled = true;
+  } else {
+    masterLbl.classList.remove('disabled');
+    dataLbl.classList.remove('disabled');
+    useEmbBtn.disabled = false;
+    loadDemoBtn.disabled = false;
+  }
+}
+
+document.getElementById('btnLogin').onclick = () => {
+  let role = document.getElementById('loginRole').value;
+  let pass = document.getElementById('loginPass').value;
+
+  if(role === 'Admin' && pass === adminPasswordState){
+    setRole('Admin');
+  } else if(role === 'User' && pass === userPasswordState){
+    setRole('User');
+  } else {
+    alert('Password salah!');
+  }
+};
+
+document.getElementById('btnOpenChangePass').onclick = () => {
+  document.getElementById('currPass').value = '';
+  document.getElementById('newPass').value = '';
+  document.getElementById('confirmPass').value = '';
+  document.getElementById('changePassModal').classList.remove('hidden');
+};
+document.getElementById('btnCancelPass').onclick = () => {
+  document.getElementById('changePassModal').classList.add('hidden');
+};
+document.getElementById('btnSavePass').onclick = () => {
+  let curr = document.getElementById('currPass').value;
+  let newP = document.getElementById('newPass').value;
+  let conf = document.getElementById('confirmPass').value;
+  if(curr !== adminPasswordState){ alert('Password lama salah!'); return; }
+  if(!newP){ alert('Password baru tidak boleh kosong!'); return; }
+  if(newP !== conf){ alert('Konfirmasi password tidak cocok!'); return; }
+  adminPasswordState = newP;
+  document.getElementById('changePassModal').classList.add('hidden');
+  toast('Password berhasil diperbarui!');
+};
+document.getElementById('btnLogout').onclick = () => {
+  currentUserRole = null;
+  document.getElementById('loginModal').classList.remove('hidden');
+};
+
+function esc(x){ return String(x??'').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m])); }
+function escAttr(x){ return esc(x).replace(/\n/g,' '); }
+function toast(msg){
+  let t = document.getElementById('toast');
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => { t.style.display = 'none'; }, 2500);
+}
+
+function mapAttendance(o){
+  return {
+    Day: String(o['Day'] || o['day'] || ''),
+    Date: String(o['Date'] || o['date'] || ''),
+    Position: String(o['Position'] || o['position'] || ''),
+    PlannedShift: String(o['Planned Shift'] || o['PlannedShift'] || o['Planned_Shift'] || ''),
+    PlannedDateIn: String(o['Planned Date In'] || o['PlannedDateIn'] || o['Planned DateIn'] || ''),
+    PlannedTimeIn: String(o['Planned Time In'] || o['PlannedTimeIn'] || o['Planned TimeIn'] || ''),
+    PlannedDateOut: String(o['Planned Date Out'] || o['PlannedDateOut'] || o['Planned DateOut'] || ''),
+    PlannedTimeOut: String(o['Planned Time Out'] || o['PlannedTimeOut'] || o['Planned TimeOut'] || ''),
+    FingerDateIn: String(o['Finger Date In'] || o['FingerDateIn'] || o['Finger DateIn'] || ''),
+    FingerTimeIn: String(o['Finger Time In'] || o['FingerTimeIn'] || o['Finger TimeIn'] || ''),
+    FingerDateOut: String(o['Finger Date Out'] || o['FingerDateOut'] || o['Finger DateOut'] || ''),
+    FingerTimeOut: String(o['Finger Time Out'] || o['FingerTimeOut'] || o['Finger TimeOut'] || ''),
+    ManualShiftCode: '',
+    ActualShiftDesc: String(o['Actual Shift'] || o['ActualShift'] || o['Actual Shift Desc'] || o['Actual Shift Description'] || ''),
+    ManualShiftDescFlag: false,
+    UserModifiedTime: false,
+    ActualDateIn: String(o['Actual Date In'] || o['ActualDateIn'] || ''),
+    ActualTimeIn: String(o['Actual Time In'] || o['ActualTimeIn'] || ''),
+    ActualDateOut: String(o['Actual Date Out'] || o['ActualDateOut'] || ''),
+    ActualTimeOut: String(o['Actual Time Out'] || o['ActualTimeOut'] || ''),
+    ControlStatus: 'Needs Review',
+    Issue: ''
+  };
+}
+
+document.getElementById('dataInput').onchange = e => {
+  if(e.target.files[0]){
+    let fr = new FileReader();
+    fr.onload = ev => {
+      try {
+        let wb = XLSX.read(ev.target.result, { type: 'array' });
+        let ws = wb.Sheets[wb.SheetNames[0]];
+        let rawJson = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+
+        let headerIdx = 0;
+        for(let i=0; i<Math.min(10, rawJson.length); i++){
+          let rowStr = rawJson[i].join(' ').toLowerCase();
+          if(rowStr.includes('planned shift') || rowStr.includes('planned date') || rowStr.includes('finger date') || rowStr.includes('position')){
+            headerIdx = i;
+            break;
+          }
+        }
+
+        let d = XLSX.utils.sheet_to_json(ws, { range: headerIdx, defval: '' });
+        rows = d.map(mapAttendance).filter(r => r.Day || r.Date || r.Position || r.PlannedShift);
+
+        document.getElementById('dataCount').textContent = rows.length;
+        render();
+        toast(`${rows.length} data absensi berhasil dimuat dan dianalisis!`);
+      } catch(err) {
+        alert('Gagal membaca file Excel. Pastikan format file sesuai!');
+      }
+    };
+    fr.readAsArrayBuffer(e.target.files[0]);
+  }
+};
+
+document.getElementById('masterInput').onchange = e => {
+  if(e.target.files[0]){
+    let fr = new FileReader();
+    fr.onload = ev => {
+      try {
+        let wb = XLSX.read(ev.target.result, { type: 'array' });
+        let ws = wb.Sheets[wb.SheetNames[0]];
+        let d = XLSX.utils.sheet_to_json(ws, { defval: '' });
+        let list = d.map(x => ({ 
+          code: String(x['ShiftCode'] || x['Shift Code'] || x.Code || '').trim(), 
+          desc: String(x['ShiftName'] || x['Shift Name'] || x.Description || '').trim(),
+          start: String(x['ShiftStartTime'] || x['Start Time'] || '').trim(),
+          end: String(x['ShiftEndTime'] || x['End Time'] || '').trim()
+        })).filter(x => x.code);
+        if(list.length > 0){
+          prepMaster(list);
+          render();
+          toast(master.length + ' custom master shifts loaded');
+        }
+      } catch(err) {
+        alert('Gagal membaca file Custom Shift Master!');
+      }
+    };
+    fr.readAsArrayBuffer(e.target.files[0]);
+  }
+};
+
+document.getElementById('useEmbedded').onclick = () => { prepMaster(EMBEDDED_MASTER); render(); toast('Embedded master loaded'); };
+document.getElementById('loadDemo').onclick = () => {
+  rows = DEMO_DATASET.map(x => mapAttendance({...x}));
+  document.getElementById('dataCount').textContent = rows.length;
+  render();
+  toast('Reference demo loaded successfully');
+};
+
+document.getElementById('btnAutoCorrectAll').onclick = autoCorrectAll;
+document.getElementById('applyVisible').onclick = applyVisible;
+document.getElementById('exportBtn').onclick = exportData;
+
+document.getElementById('showOnlySuggested').onclick = () => {
+  onlySuggested = !onlySuggested;
+  document.getElementById('showOnlySuggested').textContent = onlySuggested ? 'Show All Records' : 'Show Issues Only';
+  render();
+};
+
+['search','statusFilter','issueFilter'].forEach(id => {
+  document.getElementById(id).addEventListener('input', render);
+});
+
+// Initialization
+prepMaster(EMBEDDED_MASTER);
+setRole('Admin'); // Set default role ke Admin agar siap dipakai
+</script>
+</body>
+</html>
