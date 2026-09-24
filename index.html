@@ -496,6 +496,16 @@ function fmtMin(min){
   let m = ((Math.round(min)%1440)+1440)%1440;
   return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
 }
+/* Clock-in/out rounds to the nearest hour: <=30min past the hour stays on that
+   hour, >30min rolls to the next hour (14:38 -> 15:00, 23:05 -> 23:00). Shift
+   matching runs on this rounded value, not the raw punch. */
+function roundToShiftHour(min){
+  if(min == null) return null;
+  let h = Math.floor(min/60);
+  let rem = min - h*60;
+  let rh = rem <= 30 ? h : h+1;
+  return (((rh % 24) + 24) % 24) * 60;
+}
 function parseShift(desc){
   let m = String(desc).match(/(\d{1,2}(?::|\.)\d{2})\s*-\s*(\d{1,2}(?::|\.)\d{2})/);
   if(!m) return null;
@@ -569,7 +579,7 @@ function bestShiftMatch(vals, w){
   return best;
 }
 function findBestShiftForTime(tIn, tOut, isSat){
-  let inMin = parseTime(tIn), outMin = parseTime(tOut);
+  let inMin = roundToShiftHour(parseTime(tIn)), outMin = roundToShiftHour(parseTime(tOut));
   if(inMin == null && outMin == null) return null;
   let actDur = (inMin != null && outMin != null) ? (outMin < inMin ? (1440-inMin+outMin) : (outMin-inMin)) : null;
   return bestShiftMatch({inMin, outMin, actDur, isSat}, {in:2.0, out:1.5, dur:1.0, satBias:false});
@@ -581,8 +591,8 @@ function recommendShift(r){
     let m = shiftByCode(r.ManualShiftCode);
     if(m) return m;
   }
-  let fin = parseTime(r.ActualTimeIn || r.FingerTimeIn);
-  let fout = parseTime(r.ActualTimeOut || r.FingerTimeOut);
+  let fin = roundToShiftHour(parseTime(r.ActualTimeIn || r.FingerTimeIn));
+  let fout = roundToShiftHour(parseTime(r.ActualTimeOut || r.FingerTimeOut));
   let actDur = (fin != null && fout != null) ? (fout < fin ? (1440-fin+fout) : (fout-fin)) : null;
   let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
   let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
