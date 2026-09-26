@@ -493,15 +493,12 @@ function fmtMin(min){
   let m = ((Math.round(min)%1440)+1440)%1440;
   return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
 }
-/* Clock-in/out rounds to the nearest hour: <=30min past the hour stays on that
-   hour, >30min rolls to the next hour (14:38 -> 15:00, 23:05 -> 23:00). Shift
+/* Clock-in/out rounds to the nearest half hour, :15 and :45 roll up
+   (08:14 -> 08:00, 08:27 -> 08:30, 08:45 -> 09:00, 18:01 -> 18:00). Shift
    matching runs on this rounded value, not the raw punch. */
-function roundToShiftHour(min){
+function roundToHalfHour(min){
   if(min == null) return null;
-  let h = Math.floor(min/60);
-  let rem = min - h*60;
-  let rh = rem <= 30 ? h : h+1;
-  return (((rh % 24) + 24) % 24) * 60;
+  return (Math.floor((min + 15) / 30) * 30) % 1440;
 }
 function parseShift(desc){
   let m = String(desc).match(/(\d{1,2}(?::|\.)\d{2})\s*-\s*(\d{1,2}(?::|\.)\d{2})/);
@@ -520,17 +517,15 @@ function addDays(dateStr, days){
   d.setDate(d.getDate() + days);
   return `${String(d.getDate()).padStart(2,'0')}-${String(d.getMonth()+1).padStart(2,'0')}-${d.getFullYear()}`;
 }
-function isSaturday(dayStr, dateStr){
-  let d = (dayStr || '').toLowerCase();
-  if(d.includes('sat') || d.includes('sab')) return true;
-  if(dateStr){
-    let p = dateStr.split('-');
-    if(p.length === 3){
-      let dt = p[2].length === 4 ? new Date(p[2], p[1]-1, p[0]) : new Date(p[0], p[1]-1, p[2]);
-      if(!isNaN(dt) && dt.getDay() === 6) return true;
-    }
+/* Weekend = the clock-in date is a Saturday or Sunday. A Friday shift running past
+   midnight into Saturday still counts as a weekday shift. */
+function isWeekend(dayStr, dateStr){
+  let p = String(dateStr || '').split(/[-\/]/);
+  if(p.length === 3){
+    let dt = p[2].length === 4 ? new Date(p[2], p[1]-1, p[0]) : new Date(p[0], p[1]-1, p[2]);
+    if(!isNaN(dt)) return dt.getDay() === 0 || dt.getDay() === 6;
   }
-  return false;
+  return /sat|sab|sun|ming/.test(String(dayStr || '').toLowerCase());
 }
 
 /* ---------- shift master ---------- */
@@ -572,18 +567,10 @@ function shiftByCode(code){
   return master.find(m => m.code.toLowerCase() === c) || null;
 }
 
-/* ---------- shared candidate scorer (was duplicated in two places) ---------- */
-function scoreCandidate(m, vals, w){
-  let score = 0;
-  if(w.in && vals.inMin != null){ let d = Math.abs(vals.inMin - m.startMin); if(d>720) d = 1440-d; score += d*w.in; }
-  if(w.out && vals.outMin != null){ let d = Math.abs(vals.outMin - m.endMin); if(d>720) d = 1440-d; score += d*w.out; }
-  if(w.dur && vals.actDur != null){ score += Math.abs(vals.actDur - m.duration) * w.dur; }
-  if(w.satBias){
-    if(vals.isSat) score += (m.duration>=240 && m.duration<=390) ? -150 : 200;
-    else if(m.duration>=450 && m.duration<=600) score -= 100;
-  }
-  return score;
-}
+/* ---------- shift matching ---------- */
+const WEEKDAY_SPAN = 540;          // 8h work + 1h break, e.g. 08:30-17:30
+const WEEKEND_SPANS = [300, 360];  // 5h / 6h when clocking in on Sat/Sun; first is the default
+
 function isPlannedOff(r){
   let p = (r.PlannedShift || '').toLowerCase();
   return p.includes('off') || p.includes('libur');
@@ -602,33 +589,54 @@ function candidateShifts(offDay){
   let off = timed.filter(isOffVariant);
   return off.length ? off : work;
 }
-function bestShiftMatch(vals, w, offDay){
-  let best = null, bestScore = Infinity;
-  candidateShifts(offDay).forEach(m => {
-    let s = scoreCandidate(m, vals, w);
-    if(s < bestScore){ bestScore = s; best = m; }
-  });
-  return best;
-}
-function findBestShiftForTime(tIn, tOut, isSat, offDay){
-  let inMin = roundToShiftHour(parseTime(tIn)), outMin = roundToShiftHour(parseTime(tOut));
+function circDiff(a, b){ let d = Math.abs(a - b) % 1440; return d > 720 ? 1440 - d : d; }
+function spanOf(inMin, outMin){ return outMin < inMin ? 1440 - inMin + outMin : outMin - inMin; }
+
+/* Picks the shift for a clock-in and/or clock-out (raw strings, rounded to the half hour here).
+   1. The planned shift wins when it starts at the rounded in (if any) and ends within 30 min of the
+      rounded out (if any) — so an out-only row follows its plan.
+   2. Otherwise the shift starting nearest the in (or, out-only, ending nearest the out), with the
+      standard length: 9h on weekdays, 5h/6h on weekends (whichever fits the out, default 5h).
+      Work on a day off has no standard, so its length follows the punches when both exist. */
+function matchShift({ tIn, tOut, weekend, offDay, planned }){
+  let inMin = roundToHalfHour(parseTime(tIn)), outMin = roundToHalfHour(parseTime(tOut));
   if(inMin == null && outMin == null) return null;
-  let actDur = (inMin != null && outMin != null) ? (outMin < inMin ? (1440-inMin+outMin) : (outMin-inMin)) : null;
-  return bestShiftMatch({inMin, outMin, actDur, isSat}, {in:2.0, out:1.5, dur:1.0, satBias:false}, offDay);
-}
-/* Shift whose start (edge 'in') or end (edge 'out') is closest to the given time; ties go to the
-   shift closest in length to the one currently assigned, so editing one side keeps the shift length. */
-function findShiftByEdge(t, edge, prefDur, offDay){
-  let min = roundToShiftHour(parseTime(t));
-  if(min == null) return null;
+
+  if(planned && !offDay && planned.startMin != null && planned.endMin != null
+     && (inMin == null || inMin === planned.startMin)
+     && (outMin == null || circDiff(outMin, planned.endMin) <= 30)) return planned;
+
+  let span;
+  if(inMin != null && outMin != null && offDay) span = spanOf(inMin, outMin);
+  else if(!weekend) span = WEEKDAY_SPAN;
+  else if(inMin != null && outMin != null){
+    let worked = spanOf(inMin, outMin);
+    span = WEEKEND_SPANS.reduce((a, b) => Math.abs(b - worked) < Math.abs(a - worked) ? b : a);
+  } else span = WEEKEND_SPANS[0];
+
   let best = null, bestScore = Infinity;
   candidateShifts(offDay).forEach(m => {
-    let d = Math.abs(min - (edge === 'in' ? m.startMin : m.endMin));
-    if(d > 720) d = 1440 - d;
-    let s = d * 10 + Math.abs(m.duration - prefDur);
+    let edge = inMin != null ? circDiff(inMin, m.startMin) : circDiff(outMin, m.endMin);
+    let s = edge * 10 + Math.abs(m.duration - span);
     if(s < bestScore){ bestScore = s; best = m; }
   });
   return best;
+}
+function plannedShiftOf(r){
+  let p = (r.PlannedShift || '').trim().toLowerCase();
+  if(!p) return null;
+  return shiftByCode(p) || master.find(x => x.desc.toLowerCase().includes(p)) || null;
+}
+/* Real punches for a row: typed/imported Actual times, else the fingerprint — but never a time
+   analyze() only pre-filled from the matched shift. */
+function matchRow(r){
+  return matchShift({
+    tIn: r.PrefilledIn ? '' : (r.ActualTimeIn || r.FingerTimeIn),
+    tOut: r.PrefilledOut ? '' : (r.ActualTimeOut || r.FingerTimeOut),
+    weekend: isWeekend(r.Day, r.ActualDateIn || r.FingerDateIn || r.PlannedDateIn || r.Date),
+    offDay: isPlannedOff(r),
+    planned: plannedShiftOf(r)
+  });
 }
 
 /* ---------- recommendation + analysis ---------- */
@@ -637,23 +645,12 @@ function recommendShift(r){
     let m = shiftByCode(r.ManualShiftCode);
     if(m) return m;
   }
-  let fin = roundToShiftHour(parseTime(r.ActualTimeIn || r.FingerTimeIn));
-  let fout = roundToShiftHour(parseTime(r.ActualTimeOut || r.FingerTimeOut));
-  let actDur = (fin != null && fout != null) ? (fout < fin ? (1440-fin+fout) : (fout-fin)) : null;
-  let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
-  let offDay = isPlannedOff(r);
-  // Judge "worked on a day off" by the real punches, not Actual times (analyze pre-fills those from the plan).
+  // Judge "worked on a day off" by the real punches, not Actual times (analyze pre-fills those).
   let punched = parseTime(r.FingerTimeIn) != null || parseTime(r.FingerTimeOut) != null || r.UserModifiedTime;
-
-  if(offDay && !punched){
+  if(isPlannedOff(r) && !punched){
     return shiftByCode('OFF') || { code: 'OFF', desc: 'Day Off', start: '06:00', end: '19:00', cross: false, duration: 780 };
   }
-  if(fin == null && fout == null && !offDay){
-    let m = master.find(x => x.code.toLowerCase() === (r.PlannedShift||'').toLowerCase() || x.desc.toLowerCase().includes((r.PlannedShift||'').toLowerCase()));
-    if(m) return m;
-  }
-  return bestShiftMatch({inMin: fin, outMin: null, actDur, isSat}, {in:1.5, out:0, dur:1.0, satBias:true}, offDay)
-      || (shiftByCode('OFF') || master[0]);
+  return matchRow(r) || plannedShiftOf(r) || shiftByCode('OFF') || master[0];
 }
 
 function analyze(r){
@@ -663,13 +660,19 @@ function analyze(r){
     r.ActualShiftDesc = matchedShift ? matchedShift.desc : (r.ActualShiftDesc || 'Day Off');
   }
   if(!r.ActualDateIn) r.ActualDateIn = r.FingerDateIn || r.PlannedDateIn || r.Date;
-  if(!r.ActualTimeIn) r.ActualTimeIn = r.FingerTimeIn || r.PlannedTimeIn || (matchedShift ? matchedShift.start : '');
+  // A missing punch is filled from the matched shift (out 18:01 only -> in 09:00); the Prefilled
+  // flags keep matchRow() from treating that filler as a real punch on the next render.
+  if(!r.ActualTimeIn){
+    if(r.FingerTimeIn) r.ActualTimeIn = r.FingerTimeIn;
+    else { r.ActualTimeIn = (matchedShift && matchedShift.start) || r.PlannedTimeIn; r.PrefilledIn = true; }
+  }
 
   if(!r.ActualTimeOut){
     if(r.FingerTimeOut){
       r.ActualTimeOut = r.FingerTimeOut;
       r.ActualDateOut = r.FingerDateOut || r.ActualDateIn;
     } else if(matchedShift && matchedShift.end){
+      r.PrefilledOut = true;
       r.ActualTimeOut = matchedShift.end;
       r.ActualDateOut = matchedShift.cross ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
     }
@@ -788,15 +791,19 @@ function setFieldTimeDate(idx, field, val){
   r[field] = val;
   r.UserModifiedTime = true;
   let msg = 'Date updated.';
-  // Editing one clock time picks the shift that starts/ends there and moves the other time to its
-  // opposite edge. The pick is pinned as ManualShiftCode so analyze() on render doesn't re-guess it.
+  // Editing one clock time matches a shift from that time alone (same rules as a one-sided punch)
+  // and moves the other time to the shift's opposite edge. The pick is pinned as ManualShiftCode so
+  // analyze() on render doesn't re-guess it.
   if(field === 'ActualTimeIn' || field === 'ActualTimeOut'){
     let edge = field === 'ActualTimeIn' ? 'in' : 'out';
-    let cur = shiftByCode(r.ActualShiftCode);
-    let prefDur = (cur && cur.code.toUpperCase() !== 'OFF' && cur.duration) ? cur.duration : 480;
-    let m = findShiftByEdge(val, edge, prefDur, isPlannedOff(r));
+    let m = matchShift({
+      tIn: edge === 'in' ? val : '', tOut: edge === 'out' ? val : '',
+      weekend: isWeekend(r.Day, r.ActualDateIn || r.FingerDateIn || r.PlannedDateIn || r.Date),
+      offDay: isPlannedOff(r), planned: plannedShiftOf(r)
+    });
     if(m){
       if(edge === 'in') r.ActualTimeOut = m.end; else r.ActualTimeIn = m.start;
+      r.PrefilledIn = r.PrefilledOut = false;
       r.ManualShiftCode = m.code;
       r.ActualShiftCode = m.code;
       r.ActualShiftDesc = m.desc;
@@ -846,8 +853,7 @@ function applySingle(idx){
   if(currentUserRole !== 'Admin') return;
   let r = rows[idx];
   if(r.UserModifiedTime || (!r.ManualShiftCode && (r.ActualTimeIn || r.ActualTimeOut))){
-    let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
-    let best = findBestShiftForTime(r.ActualTimeIn || r.FingerTimeIn, r.ActualTimeOut || r.FingerTimeOut, isSat, isPlannedOff(r));
+    let best = matchRow(r);
     if(best){
       r.ActualShiftCode = best.code;
       r.ManualShiftCode = best.code;
