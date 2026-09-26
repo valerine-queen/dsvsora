@@ -211,19 +211,19 @@ footer{text-align:center;color:var(--ink-faint);font-size:11px;margin-top:18px}
   <details class="setup" id="setupPanel">
     <summary>
       <h2>Setup &amp; import <span class="chev">▸</span></h2>
-      <span class="muted" id="setupSummary">314 embedded shift codes · showing example data</span>
+      <span class="muted" id="setupSummary">Embedded shift codes · showing example data</span>
     </summary>
     <div class="setup-body">
       <div class="setup-card">
         <h3>① Master shift reference</h3>
-        <div class="muted">314 shift codes are embedded by default. Upload a spreadsheet to override them.</div>
+        <div class="muted"><span class="embeddedCount">0</span> shift codes are embedded by default. Upload a spreadsheet to override them — it is remembered in this browser until you reset.</div>
         <div class="toolrow">
           <label class="btn ghost sm file admin-only">📥 Upload custom master
             <input id="masterInput" type="file" accept=".xlsx,.xls,.csv,.txt">
           </label>
-          <button class="btn ghost sm admin-only" id="useEmbedded">Reset to embedded (314)</button>
+          <button class="btn ghost sm admin-only" id="useEmbedded">Reset to embedded (<span class="embeddedCount">0</span>)</button>
         </div>
-        <div class="setup-status"><b id="masterCount">0</b> master shift definitions active</div>
+        <div class="setup-status"><b id="masterCount">0</b> master shift definitions active <span class="pill" id="masterSource" hidden></span></div>
       </div>
       <div class="setup-card">
         <h3>② Attendance data</h3>
@@ -534,7 +534,26 @@ function isSaturday(dayStr, dateStr){
 }
 
 /* ---------- shift master ---------- */
-function prepMaster(list){
+/* An uploaded master is kept in this browser's localStorage so it survives reloads; storage can be
+   blocked (private window, cleared site data), in which case we quietly fall back to the embedded list. */
+const MASTER_KEY = 'dsvsora.master';
+function saveMaster(list, source){
+  try{
+    if(list) localStorage.setItem(MASTER_KEY, JSON.stringify({ list, source }));
+    else localStorage.removeItem(MASTER_KEY);
+    return true;
+  } catch(err){ return false; }
+}
+function loadMaster(){
+  try{
+    let s = JSON.parse(localStorage.getItem(MASTER_KEY));
+    return (s && Array.isArray(s.list) && s.list.length) ? s : null;
+  } catch(err){ return null; }
+}
+function prepMaster(list, source){
+  let pill = document.getElementById('masterSource');
+  pill.hidden = !source;
+  pill.textContent = source ? `Uploaded: ${source.name} · ${source.date}` : '';
   master = list.map(x => {
     let p = parseShift(x.desc || x.code || '');
     let sStr = x.start || (p ? fmtMin(p.start) : '');
@@ -756,7 +775,7 @@ function render(){
 
 function updateSetupSummary(){
   document.getElementById('setupSummary').textContent =
-    `${master.length} shift codes loaded · ${rows.length} record${rows.length===1?'':'s'}${isDemoData ? ' (example data)' : ''}`;
+    `${master.length} shift codes loaded${document.getElementById('masterSource').hidden ? '' : ' (custom)'} · ${rows.length} record${rows.length===1?'':'s'}${isDemoData ? ' (example data)' : ''}`;
 }
 
 /* ---------- interactions ---------- */
@@ -962,13 +981,24 @@ document.getElementById('masterInput').onchange = e => {
         start: String(x['ShiftStartTime'] || x['Start Time'] || '').trim(),
         end: String(x['ShiftEndTime'] || x['End Time'] || '').trim()
       })).filter(x => x.code);
-      if(list.length > 0){ prepMaster(list); render(); toast(master.length + ' custom master shifts loaded.'); }
+      if(list.length > 0){
+        let source = { name: e.target.files[0].name, date: new Date().toLocaleDateString('en-GB') };
+        let saved = saveMaster(list, source);
+        prepMaster(list, source);
+        render();
+        toast(master.length + ' custom master shifts loaded' + (saved ? ' and saved in this browser.' : ' (could not save — it will reset on reload).'));
+      }
     } catch(err){ alert('Could not read that shift master file.'); }
   };
   fr.readAsArrayBuffer(e.target.files[0]);
 };
 
-document.getElementById('useEmbedded').onclick = () => { prepMaster(EMBEDDED_MASTER); render(); toast('Embedded master (314 shifts) restored.'); };
+document.getElementById('useEmbedded').onclick = () => {
+  saveMaster(null);
+  prepMaster(EMBEDDED_MASTER);
+  render();
+  toast(`Embedded master (${EMBEDDED_MASTER.length} shifts) restored.`);
+};
 document.getElementById('loadDemo').onclick = () => {
   rows = DEMO_DATASET.map(x => mapAttendance({...x}));
   isDemoData = true;
@@ -993,7 +1023,10 @@ function toast(msg){
   clearTimeout(t._h);
   t._h = setTimeout(() => { t.style.display = 'none'; }, 2600);
 }
-prepMaster(EMBEDDED_MASTER);
+document.querySelectorAll('.embeddedCount').forEach(el => el.textContent = EMBEDDED_MASTER.length);
+let storedMaster = loadMaster();
+if(storedMaster) prepMaster(storedMaster.list, storedMaster.source);
+else prepMaster(EMBEDDED_MASTER);
 rows = DEMO_DATASET.map(x => mapAttendance({...x}));
 isDemoData = true;
 setRole('Admin');
