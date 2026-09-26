@@ -565,21 +565,51 @@ function scoreCandidate(m, vals, w){
   }
   return score;
 }
-function bestShiftMatch(vals, w){
+function isPlannedOff(r){
+  let p = (r.PlannedShift || '').toLowerCase();
+  return p.includes('off') || p.includes('libur');
+}
+/* "Hari Libur" variants (HK19AOFF…) — the code used when someone works on a planned day off.
+   The bare OFF code is the day off itself, not a worked shift. */
+function isOffVariant(m){
+  return m.code.toUpperCase() !== 'OFF' && (/OFF$/i.test(m.code) || /hari\s*libur/i.test(m.desc));
+}
+/* Worked shifts eligible for matching: Libur variants on a planned day off, Kerja shifts otherwise.
+   Falls back to Kerja shifts if the loaded master has no Libur variants. */
+function candidateShifts(offDay){
+  let timed = master.filter(m => m.code.toUpperCase() !== 'OFF' && m.startMin != null && m.endMin != null);
+  let work = timed.filter(m => !isOffVariant(m));
+  if(!offDay) return work;
+  let off = timed.filter(isOffVariant);
+  return off.length ? off : work;
+}
+function bestShiftMatch(vals, w, offDay){
   let best = null, bestScore = Infinity;
-  master.forEach(m => {
-    if(m.code === 'OFF' || m.code.endsWith('OFF')) return;
-    if(m.startMin == null || m.endMin == null) return;
+  candidateShifts(offDay).forEach(m => {
     let s = scoreCandidate(m, vals, w);
     if(s < bestScore){ bestScore = s; best = m; }
   });
   return best;
 }
-function findBestShiftForTime(tIn, tOut, isSat){
+function findBestShiftForTime(tIn, tOut, isSat, offDay){
   let inMin = roundToShiftHour(parseTime(tIn)), outMin = roundToShiftHour(parseTime(tOut));
   if(inMin == null && outMin == null) return null;
   let actDur = (inMin != null && outMin != null) ? (outMin < inMin ? (1440-inMin+outMin) : (outMin-inMin)) : null;
-  return bestShiftMatch({inMin, outMin, actDur, isSat}, {in:2.0, out:1.5, dur:1.0, satBias:false});
+  return bestShiftMatch({inMin, outMin, actDur, isSat}, {in:2.0, out:1.5, dur:1.0, satBias:false}, offDay);
+}
+/* Shift whose start (edge 'in') or end (edge 'out') is closest to the given time; ties go to the
+   shift closest in length to the one currently assigned, so editing one side keeps the shift length. */
+function findShiftByEdge(t, edge, prefDur, offDay){
+  let min = roundToShiftHour(parseTime(t));
+  if(min == null) return null;
+  let best = null, bestScore = Infinity;
+  candidateShifts(offDay).forEach(m => {
+    let d = Math.abs(min - (edge === 'in' ? m.startMin : m.endMin));
+    if(d > 720) d = 1440 - d;
+    let s = d * 10 + Math.abs(m.duration - prefDur);
+    if(s < bestScore){ bestScore = s; best = m; }
+  });
+  return best;
 }
 
 /* ---------- recommendation + analysis ---------- */
@@ -592,16 +622,18 @@ function recommendShift(r){
   let fout = roundToShiftHour(parseTime(r.ActualTimeOut || r.FingerTimeOut));
   let actDur = (fin != null && fout != null) ? (fout < fin ? (1440-fin+fout) : (fout-fin)) : null;
   let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
-  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+  let offDay = isPlannedOff(r);
+  // Judge "worked on a day off" by the real punches, not Actual times (analyze pre-fills those from the plan).
+  let punched = parseTime(r.FingerTimeIn) != null || parseTime(r.FingerTimeOut) != null || r.UserModifiedTime;
 
-  if(fin == null && fout == null && isPlannedOff){
+  if(offDay && !punched){
     return shiftByCode('OFF') || { code: 'OFF', desc: 'Day Off', start: '06:00', end: '19:00', cross: false, duration: 780 };
   }
-  if(fin == null && fout == null && !isPlannedOff){
+  if(fin == null && fout == null && !offDay){
     let m = master.find(x => x.code.toLowerCase() === (r.PlannedShift||'').toLowerCase() || x.desc.toLowerCase().includes((r.PlannedShift||'').toLowerCase()));
     if(m) return m;
   }
-  return bestShiftMatch({inMin: fin, outMin: null, actDur, isSat}, {in:1.5, out:0, dur:1.0, satBias:true})
+  return bestShiftMatch({inMin: fin, outMin: null, actDur, isSat}, {in:1.5, out:0, dur:1.0, satBias:true}, offDay)
       || (shiftByCode('OFF') || master[0]);
 }
 
@@ -627,17 +659,17 @@ function analyze(r){
   }
 
   let issues = [];
-  let isPlannedOff = (r.PlannedShift || '').toLowerCase().includes('off') || (r.PlannedShift || '').toLowerCase().includes('libur');
+  let offDay = isPlannedOff(r);
   let fingerIn = parseTime(r.FingerTimeIn);
   let fingerOut = parseTime(r.FingerTimeOut);
 
-  if(isPlannedOff && (fingerIn != null || fingerOut != null || r.ActualShiftCode !== 'OFF')) issues.push('Overtime Holiday');
-  if(!isPlannedOff && fingerIn == null && fingerOut == null && !r.UserModifiedTime) issues.push('Missing Fingerprint');
-  if(!isPlannedOff && r.PlannedShift && r.PlannedShift !== r.ActualShiftCode) issues.push('Shift Mismatch');
+  if(offDay && (fingerIn != null || fingerOut != null || r.ActualShiftCode !== 'OFF')) issues.push('Overtime Holiday');
+  if(!offDay && fingerIn == null && fingerOut == null && !r.UserModifiedTime) issues.push('Missing Fingerprint');
+  if(!offDay && r.PlannedShift && r.PlannedShift !== r.ActualShiftCode) issues.push('Shift Mismatch');
 
   let actInMin = parseTime(r.ActualTimeIn);
   let actOutMin = parseTime(r.ActualTimeOut);
-  if(!isPlannedOff && actInMin != null && actOutMin != null && matchedShift && matchedShift.duration > 0){
+  if(!offDay && actInMin != null && actOutMin != null && matchedShift && matchedShift.duration > 0){
     let actDur = actOutMin < actInMin ? (1440-actInMin+actOutMin) : (actOutMin-actInMin);
     if(actDur - matchedShift.duration >= 120) issues.push('Possible Overtime');
   }
@@ -733,19 +765,34 @@ function handleInputKey(e, idx, field, val){
 }
 function setFieldTimeDate(idx, field, val){
   if(currentUserRole !== 'Admin') return;
-  rows[idx][field] = val;
-  rows[idx].UserModifiedTime = true;
-  rows[idx].ManualShiftCode = '';
-  let isSat = isSaturday(rows[idx].Day, rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
-  let bestMatch = findBestShiftForTime(rows[idx].ActualTimeIn, rows[idx].ActualTimeOut, isSat);
-  if(bestMatch){
-    rows[idx].ActualShiftCode = bestMatch.code;
-    rows[idx].ActualShiftDesc = bestMatch.desc;
-    rows[idx].ActualDateOut = bestMatch.cross ? addDays(rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date, 1) : (rows[idx].ActualDateIn || rows[idx].PlannedDateIn || rows[idx].Date);
+  let r = rows[idx];
+  r[field] = val;
+  r.UserModifiedTime = true;
+  let msg = 'Date updated.';
+  // Editing one clock time picks the shift that starts/ends there and moves the other time to its
+  // opposite edge. The pick is pinned as ManualShiftCode so analyze() on render doesn't re-guess it.
+  if(field === 'ActualTimeIn' || field === 'ActualTimeOut'){
+    let edge = field === 'ActualTimeIn' ? 'in' : 'out';
+    let cur = shiftByCode(r.ActualShiftCode);
+    let prefDur = (cur && cur.code.toUpperCase() !== 'OFF' && cur.duration) ? cur.duration : 480;
+    let m = findShiftByEdge(val, edge, prefDur, isPlannedOff(r));
+    if(m){
+      if(edge === 'in') r.ActualTimeOut = m.end; else r.ActualTimeIn = m.start;
+      r.ManualShiftCode = m.code;
+      r.ActualShiftCode = m.code;
+      r.ActualShiftDesc = m.desc;
+      r.ManualShiftDescFlag = false;
+      msg = `Time updated — ${edge === 'in' ? 'clock-out' : 'clock-in'}, shift code & description realigned to ${m.code}.`;
+    }
   }
-  rows[idx].ControlStatus = 'Controlled';
+  let m = shiftByCode(r.ActualShiftCode);
+  if(m && field !== 'ActualDateOut'){
+    let dIn = r.ActualDateIn || r.PlannedDateIn || r.Date;
+    r.ActualDateOut = m.cross ? addDays(dIn, 1) : dIn;
+  }
+  r.ControlStatus = 'Controlled';
   render();
-  toast('Time updated — shift code realigned automatically.');
+  toast(msg);
 }
 function setManualShiftCode(idx, val){
   if(currentUserRole !== 'Admin') return;
@@ -781,7 +828,7 @@ function applySingle(idx){
   let r = rows[idx];
   if(r.UserModifiedTime || (!r.ManualShiftCode && (r.ActualTimeIn || r.ActualTimeOut))){
     let isSat = isSaturday(r.Day, r.ActualDateIn || r.PlannedDateIn || r.Date);
-    let best = findBestShiftForTime(r.ActualTimeIn || r.FingerTimeIn, r.ActualTimeOut || r.FingerTimeOut, isSat);
+    let best = findBestShiftForTime(r.ActualTimeIn || r.FingerTimeIn, r.ActualTimeOut || r.FingerTimeOut, isSat, isPlannedOff(r));
     if(best){
       r.ActualShiftCode = best.code;
       r.ManualShiftCode = best.code;
