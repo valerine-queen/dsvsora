@@ -32,11 +32,12 @@ test('clock times round to the nearest half hour, :15/:45 up', () => {
   assert.equal(r('23:50'), '00:00');
 });
 
-test('weekday: shift starts at rounded clock-in with a 9h span', () => {
+test('off-plan weekday: shift starts at rounded clock-in with a 9h span', () => {
   const app = loadApp();
+  // Planned HK14A (14:00) is far from these punches, so the rounding rules decide.
   const [a, b, c] = analyzeRows(app, [
-    row(MON, { plan: 'HK8E', fin: '08:45', fout: '18:02' }),
-    row(MON, { plan: 'HK8E', fin: '08:27', fout: '17:35' }),
+    row(MON, { plan: 'HK14A', fin: '08:45', fout: '18:02' }),
+    row(MON, { plan: 'HK14A', fin: '08:27', fout: '17:35' }),
     row(MON, { plan: 'HK9E', fin: '09:00', fout: '21:00' }),
   ]);
   assert.equal(a.ActualShiftCode, 'HK9E');
@@ -49,11 +50,11 @@ test('planned shift wins when it fits; out-only rows follow the plan or the out'
   const app = loadApp();
   const [plan, noPlanFit, onPlan] = analyzeRows(app, [
     row(MON, { plan: 'HK9E', fout: '18:01' }),
-    row(MON, { plan: 'HK8E', fout: '18:01' }),   // HK8E ends 16:30, so pick by the out
+    row(MON, { plan: 'HK8E', fout: '23:08' }),   // 6.5h past HK8E's 16:30 end: most likely shift instead
     row(MON, { plan: 'HK85E', fin: '08:20', fout: '17:40' }),
   ]);
   assert.deepEqual([plan.ActualShiftCode, plan.ActualTimeIn], ['HK9E', '09:00']);
-  assert.deepEqual([noPlanFit.ActualShiftCode, noPlanFit.ActualTimeIn], ['HK9E', '09:00']);
+  assert.deepEqual([noPlanFit.ActualShiftCode, noPlanFit.ActualTimeIn], ['HK14D', '14:00']);
   assert.equal(onPlan.ActualShiftCode, 'HK85E');
   assert.equal(onPlan.Issue, 'No Issue');
 });
@@ -61,9 +62,9 @@ test('planned shift wins when it fits; out-only rows follow the plan or the out'
 test('weekend: 5h or 6h by clock-out (default 5h); Friday night into Saturday stays 9h', () => {
   const app = loadApp();
   const [five, six, sunInOnly, fri] = analyzeRows(app, [
-    row(SAT, { plan: 'HK8E', fin: '08:00', fout: '13:05' }),
-    row(SAT, { plan: 'HK8E', fin: '08:00', fout: '14:10' }),
-    row(SUN, { plan: 'HK8E', fin: '08:50' }),
+    row(SAT, { plan: 'HK14A', fin: '08:00', fout: '13:05' }),
+    row(SAT, { plan: 'HK14A', fin: '08:00', fout: '14:10' }),
+    row(SUN, { plan: 'HK14A', fin: '08:50' }),
     row(FRI, { plan: 'HK22B', fin: '22:00', fout: '07:02', foutDate: SAT }),
   ]);
   assert.equal(five.ActualShiftCode, 'HK8B');
@@ -86,7 +87,7 @@ test('planned day off: no punch stays OFF, a punch gets a Libur code', () => {
 
 test('editing one clock time realigns the other, code and description', () => {
   const app = loadApp();
-  analyzeRows(app, [row(MON, { plan: 'HK8E', fin: '08:45', fout: '18:02' })]);
+  analyzeRows(app, [row(MON, { plan: 'HK22B', fin: '08:45', fout: '18:02' })]);
   app.run("setFieldTimeDate(0, 'ActualTimeIn', '08:27')");
   let r = app.run('rows[0]');
   assert.deepEqual(pick(r), { code: 'HK85E', in: '08:27', dateOut: MON, out: '17:30', issue: r.Issue });
@@ -130,4 +131,85 @@ test('saved master: v2 is restored, pre-fix v1 (raw fractions) is discarded', ()
   const v1 = loadApp({ storage: { 'dsvsora.master': JSON.stringify({ list: [{ code: 'HK7A', desc: 'x', start: '0.2916', end: '0.5' }] }) } });
   assert.equal(v1.run('master.length'), 314);
   assert.ok(!('dsvsora.master' in v1.store));
+});
+
+test('planned schedule first: a punch less than 30 min from the plan keeps it', () => {
+  const app = loadApp();
+  const [inOnly, outOnly, early, late20, late29, late30, late45, longDay, satPlan] = analyzeRows(app, [
+    row(MON, { plan: 'HK85E', fin: '08:23' }),                 // out filled from the plan
+    row(MON, { plan: 'HK9E', fout: '18:00' }),                 // in filled from the plan
+    row(MON, { plan: 'HK8F', fin: '07:35' }),
+    row(MON, { plan: 'HK8F', fin: '08:20' }),
+    row(MON, { plan: 'HK8F', fin: '08:29' }),
+    row(MON, { plan: 'HK8F', fin: '08:30' }),                  // 30 min late: leaves the plan
+    row(MON, { plan: 'HK8F', fin: '08:45' }),
+    row(MON, { plan: 'HK8F', fin: '08:05', fout: '20:00' }),   // the out doesn't override the plan
+    row(SAT, { plan: 'HK8F', fin: '08:10' }),                  // plan beats the 5h weekend default
+  ]);
+  assert.deepEqual([inOnly.ActualShiftCode, inOnly.ActualTimeIn, inOnly.ActualTimeOut], ['HK85E', '08:23', '17:30']);
+  assert.deepEqual([outOnly.ActualShiftCode, outOnly.ActualTimeIn, outOnly.ActualTimeOut], ['HK9E', '09:00', '18:00']);
+  assert.equal(early.ActualShiftCode, 'HK8F');
+  assert.equal(late20.ActualShiftCode, 'HK8F');
+  assert.equal(late29.ActualShiftCode, 'HK8F');
+  assert.equal(late30.ActualShiftCode, 'HK85E');
+  assert.equal(late45.ActualShiftCode, 'HK9E');
+  assert.equal(longDay.ActualShiftCode, 'HK8F');
+  assert.match(longDay.Issue, /Possible Overtime/);
+  assert.equal(satPlan.ActualShiftCode, 'HK8F');
+  for (const r of [inOnly, outOnly, early, late20, late29, longDay, satPlan]) assert.doesNotMatch(r.Issue, /Shift Mismatch/);
+});
+
+// Rows shaped like the HR export (TEST.xlsx): Planned Shift holds the shift *name*, planned times
+// are given, and the one known punch sits in the Actual columns with the other side empty.
+function hrRow({ plan, pin, pout, date, dateOut = date, ain = '', aout = '' }) {
+  return {
+    'Planned Shift': plan, 'Planned Date In': date, 'Planned Time In': pin, 'Planned Date Out': dateOut, 'Planned Time Out': pout,
+    'Actual Date In': date, 'Actual Time In': ain, 'Actual Date Out': ain ? '' : date, 'Actual Time Out': aout,
+  };
+}
+
+test('clock-in rounds UP to the next :00/:30 when a late arrival leaves the plan', () => {
+  const app = loadApp();
+  const r = t => app.run(`fmtMin(roundUpToHalfHour(parseTime(${JSON.stringify(t)})))`);
+  assert.equal(r('07:46'), '08:00');
+  assert.equal(r('09:22'), '09:30');
+  assert.equal(r('09:00'), '09:00');
+  assert.equal(r('09:30'), '09:30');
+  assert.equal(r('23:40'), '00:00');
+});
+
+test('HR export rows: plan by name, <30 late or early = plan, 30m-2h late = rounded-up start with plan length, >2h = most likely', () => {
+  const app = loadApp();
+  const D = '10-09-2026'; // Thursday
+  const rows = analyzeRows(app, [
+    hrRow({ plan: 'Hari Kerja  08.30 - 17.30', pin: '08:30', pout: '17:30', date: D, ain: '08:23' }),
+    hrRow({ plan: 'Hari Kerja  08.30 - 17.30', pin: '08:30', pout: '17:30', date: D, ain: '07:09' }),  // early
+    hrRow({ plan: 'Hari Kerja  08.30 - 17.30', pin: '08:30', pout: '17:30', date: D, ain: '09:18' }),  // 48 late
+    hrRow({ plan: 'Hari Kerja  07.00 - 15.00', pin: '07:00', pout: '15:00', date: D, ain: '07:46' }),  // 46 late
+    hrRow({ plan: 'Hari Kerja  08.30 - 17.30', pin: '08:30', pout: '17:30', date: D, aout: '17:32' }), // out on plan
+    hrRow({ plan: 'Hari Kerja  09.00 - 18.00', pin: '09:00', pout: '18:00', date: D, aout: '18:48' }), // out <2h late
+    hrRow({ plan: 'Hari Kerja  08.00 - 16.00', pin: '08:00', pout: '16:00', date: D, ain: '15:39' }),  // >2h: most likely
+  ]);
+  const got = rows.map(r => [r.ActualShiftCode, r.ActualTimeIn, r.ActualTimeOut]);
+  assert.deepEqual(got[0], ['HK85E', '08:23', '17:30']);
+  assert.deepEqual(got[1], ['HK85E', '07:09', '17:30']);
+  assert.deepEqual(got[2], ['HK95E', '09:18', '18:30']);
+  assert.equal(rows[3].ActualTimeOut, '16:00');                       // 08:00 start, plan's 8h length
+  assert.match(rows[3].ActualShiftDesc, /08\.00 - 16\.00/);
+  assert.deepEqual(got[4], ['HK85E', '08:30', '17:32']);             // raw punch kept
+  assert.deepEqual(got[5], ['HK9E', '09:00', '18:48']);
+  assert.equal(rows[6].ActualTimeIn, '15:39');
+  assert.match(rows[6].ActualShiftDesc, /16\.00 - 01\.00/);          // 16:00 start, 9h weekday
+  for (const i of [0, 1, 4, 5]) assert.doesNotMatch(rows[i].Issue, /Shift Mismatch/, `row ${i}`);
+});
+
+test('only an early-morning clock-out, far from the plan, is the end of the previous night shift', () => {
+  const app = loadApp();
+  const [r] = analyzeRows(app, [
+    hrRow({ plan: 'Hari Kerja  07.00 - 15.00', pin: '07:00', pout: '15:00', date: '01-09-2026', aout: '07:45' }),
+  ]);
+  const s = app.run(`shiftByCode(${JSON.stringify(r.ActualShiftCode)})`);
+  assert.ok(s.cross, `${r.ActualShiftCode} should be a night shift`);
+  assert.ok(s.startMin >= 22 * 60 || s.startMin <= 60, `starts near midnight, got ${s.start}`);
+  assert.deepEqual([r.ActualDateIn, r.ActualTimeIn, r.ActualDateOut, r.ActualTimeOut], ['31-08-2026', s.start, '01-09-2026', '07:45']);
 });

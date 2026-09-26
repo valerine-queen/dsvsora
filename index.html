@@ -648,12 +648,17 @@ function fmtMin(min){
   let m = ((Math.round(min)%1440)+1440)%1440;
   return String(Math.floor(m/60)).padStart(2,'0') + ':' + String(m%60).padStart(2,'0');
 }
-/* Clock-in/out rounds to the nearest half hour, :15 and :45 roll up
-   (08:14 -> 08:00, 08:27 -> 08:30, 08:45 -> 09:00, 18:01 -> 18:00). Shift
-   matching runs on this rounded value, not the raw punch. */
+/* Clock-out rounds to the nearest half hour, :15 and :45 roll up (18:01 -> 18:00, 18:45 -> 19:00).
+   Only shift matching uses the rounded value; the Actual times keep the raw punch. */
 function roundToHalfHour(min){
   if(min == null) return null;
   return (Math.floor((min + 15) / 30) * 30) % 1440;
+}
+/* Clock-in rounds UP to the next :00 or :30 (07:46 -> 08:00, 09:22 -> 09:30, 09:00 stays) when a
+   late arrival moves someone off the plan. */
+function roundUpToHalfHour(min){
+  if(min == null) return null;
+  return (Math.ceil(min / 30) * 30) % 1440;
 }
 function parseShift(desc){
   let m = String(desc).match(/(\d{1,2}(?::|\.)\d{2})\s*-\s*(\d{1,2}(?::|\.)\d{2})/);
@@ -719,9 +724,9 @@ function prepMaster(list, source){
   master = list.map(x => {
     let p = parseShift(x.desc || x.code || '');
     let sStr = x.start || (p ? fmtMin(p.start) : '');
+    if(sStr === '23:59') sStr = '00:00';   // the HR master writes a "24.00" start as 23:59
     let eStr = x.end || (p ? fmtMin(p.end) : '');
-    // The HR master writes a "24.00" start as 23:59; treat it as midnight so it lines up with punches.
-    let startMin = parseTime(sStr) === 1439 ? 0 : parseTime(sStr);
+    let startMin = parseTime(sStr);
     let endMin = parseTime(eStr);
     let cross = (startMin != null && endMin != null) ? endMin <= startMin : false;
     let duration = (startMin != null && endMin != null) ? (cross ? (1440 - startMin + endMin) : (endMin - startMin)) : 0;
@@ -738,6 +743,8 @@ function shiftByCode(code){
 /* ---------- shift matching ---------- */
 const WEEKDAY_SPAN = 540;          // 8h work + 1h break, e.g. 08:30-17:30
 const WEEKEND_SPANS = [300, 360];  // 5h / 6h when clocking in on Sat/Sun; first is the default
+const PLAN_TOLERANCE = 30;         // minutes late before a clock-in leaves the planned shift
+const PLAN_FAR = 120;              // minutes; beyond this from the plan, pick the most likely shift instead
 
 function isPlannedOff(r){
   let p = (r.PlannedShift || '').toLowerCase();
@@ -758,24 +765,34 @@ function candidateShifts(offDay){
   return off.length ? off : work;
 }
 function circDiff(a, b){ let d = Math.abs(a - b) % 1440; return d > 720 ? 1440 - d : d; }
+function signedDiff(a, b){ let d = ((a - b) % 1440 + 1440) % 1440; return d > 720 ? d - 1440 : d; }
 function spanOf(inMin, outMin){ return outMin < inMin ? 1440 - inMin + outMin : outMin - inMin; }
 
-/* Picks the shift for a clock-in and/or clock-out (raw strings, rounded to the half hour here).
-   1. The planned shift wins when it starts at the rounded in (if any) and ends within 30 min of the
-      rounded out (if any) — so an out-only row follows its plan.
-   2. Otherwise the shift starting nearest the in (or, out-only, ending nearest the out), with the
-      standard length: 9h on weekdays, 5h/6h on weekends (whichever fits the out, default 5h).
-      Work on a day off has no standard, so its length follows the punches when both exist. */
+/* Picks the shift for a clock-in and/or clock-out (raw strings). The planned shift is the reference:
+   - Clock-in: early, or less than 30 min late -> planned. 30 min to 2h late -> the shift starting at
+     the in rounded UP to :00/:30 (07:46 -> 08:00, 09:22 -> 09:30) with the planned length.
+   - Clock-out only: within 2h of the planned end -> planned (overtime / early leave stays on plan).
+   - More than 2h from the plan either way (or no plan) -> the most likely shift: starting at the
+     rounded-up in (or, out-only, ending at the out rounded to the nearest half hour) with the
+     standard length — 9h on weekdays, 5h/6h on weekends (whichever fits the out, default 5h).
+     An early-morning out alone thus reads as the end of a night shift that began the evening before.
+   Work on a day off has no plan or standard, so its length follows the punches when both exist. */
 function matchShift({ tIn, tOut, weekend, offDay, planned }){
-  let inMin = roundToHalfHour(parseTime(tIn)), outMin = roundToHalfHour(parseTime(tOut));
-  if(inMin == null && outMin == null) return null;
+  let rawIn = parseTime(tIn), rawOut = parseTime(tOut);
+  if(rawIn == null && rawOut == null) return null;
+  let inMin = roundUpToHalfHour(rawIn), outMin = roundToHalfHour(rawOut);
 
-  if(planned && !offDay && planned.startMin != null && planned.endMin != null
-     && (inMin == null || inMin === planned.startMin)
-     && (outMin == null || circDiff(outMin, planned.endMin) <= 30)) return planned;
+  let span = null;
+  if(planned && !offDay && planned.startMin != null && planned.endMin != null){
+    if(rawIn != null){
+      let late = signedDiff(rawIn, planned.startMin);
+      if(late < PLAN_TOLERANCE && late >= -PLAN_FAR) return planned;
+      if(late >= PLAN_TOLERANCE && late <= PLAN_FAR) span = planned.duration;
+    } else if(Math.abs(signedDiff(rawOut, planned.endMin)) <= PLAN_FAR) return planned;
+  }
 
-  let span;
-  if(inMin != null && outMin != null && offDay) span = spanOf(inMin, outMin);
+  if(span != null);
+  else if(inMin != null && outMin != null && offDay) span = spanOf(inMin, outMin);
   else if(!weekend) span = WEEKDAY_SPAN;
   else if(inMin != null && outMin != null){
     let worked = spanOf(inMin, outMin);
@@ -790,10 +807,23 @@ function matchShift({ tIn, tOut, weekend, offDay, planned }){
   });
   return best;
 }
+/* Planned Shift may hold a code (HK85E) or, in the HR export, the shift name
+   ("Hari Kerja  08.30 - 17.30", spacing and 08.30/08:30 vary). Match the code, then the name
+   ignoring those differences, then the Planned Time In/Out columns. */
+function normShiftName(s){ return String(s || '').toLowerCase().replace(/(\d)[.:](\d)/g, '$1:$2').replace(/\s+/g, ' ').replace(/\s*-\s*/g, ' - ').trim(); }
 function plannedShiftOf(r){
-  let p = (r.PlannedShift || '').trim().toLowerCase();
-  if(!p) return null;
-  return shiftByCode(p) || master.find(x => x.desc.toLowerCase().includes(p)) || null;
+  let p = (r.PlannedShift || '').trim();
+  if(p){
+    let byCode = shiftByCode(p);
+    if(byCode) return byCode;
+    let n = normShiftName(p);
+    let byName = master.find(x => normShiftName(x.desc) === n);
+    if(byName) return byName;
+  }
+  let s = parseTime(r.PlannedTimeIn), e = parseTime(r.PlannedTimeOut);
+  if(s == null || e == null) return null;
+  let libur = isPlannedOff(r);
+  return master.find(x => x.startMin === s % 1440 && x.endMin === e % 1440 && x.code.toUpperCase() !== 'OFF' && isOffVariant(x) === libur) || null;
 }
 /* Real punches for a row: typed/imported Actual times, else the fingerprint — but never a time
    analyze() only pre-filled from the matched shift. */
@@ -847,6 +877,11 @@ function analyze(r){
   } else if(!r.ActualDateOut || r.ManualShiftCode){
     r.ActualDateOut = (matchedShift && matchedShift.cross) ? addDays(r.ActualDateIn, 1) : r.ActualDateIn;
   }
+  // Only a clock-out, matched to a night shift (out 07:45 -> 23:00-08:00): it began the evening before.
+  if(r.PrefilledIn && matchedShift && matchedShift.cross && r.ActualDateOut
+     && parseTime(r.ActualTimeOut) != null && parseTime(r.ActualTimeOut) < matchedShift.startMin){
+    r.ActualDateIn = addDays(r.ActualDateOut, -1);
+  }
 
   let issues = [];
   let offDay = isPlannedOff(r);
@@ -855,7 +890,12 @@ function analyze(r){
 
   if(offDay && (fingerIn != null || fingerOut != null || r.ActualShiftCode !== 'OFF')) issues.push('Overtime Holiday');
   if(!offDay && fingerIn == null && fingerOut == null && !r.UserModifiedTime) issues.push('Missing Fingerprint');
-  if(!offDay && r.PlannedShift && r.PlannedShift !== r.ActualShiftCode) issues.push('Shift Mismatch');
+  // Compare against the resolved planned shift, not the raw text (which may be a shift name), and
+  // treat codes with identical hours (HK10C / HK10C1) as the same shift.
+  let ps = plannedShiftOf(r), as = shiftByCode(r.ActualShiftCode);
+  let samePlan = ps ? (ps.code === r.ActualShiftCode || (as && as.startMin === ps.startMin && as.endMin === ps.endMin))
+                    : r.PlannedShift === r.ActualShiftCode;
+  if(!offDay && r.PlannedShift && !samePlan) issues.push('Shift Mismatch');
 
   let actInMin = parseTime(r.ActualTimeIn);
   let actOutMin = parseTime(r.ActualTimeOut);
