@@ -738,6 +738,7 @@ function shiftByCode(code){
 /* ---------- shift matching ---------- */
 const WEEKDAY_SPAN = 540;          // 8h work + 1h break, e.g. 08:30-17:30
 const WEEKEND_SPANS = [300, 360];  // 5h / 6h when clocking in on Sat/Sun; first is the default
+const PLAN_TOLERANCE = 30;         // minutes; a punch this far from the plan (or more) moves off it
 
 function isPlannedOff(r){
   let p = (r.PlannedShift || '').toLowerCase();
@@ -761,18 +762,22 @@ function circDiff(a, b){ let d = Math.abs(a - b) % 1440; return d > 720 ? 1440 -
 function spanOf(inMin, outMin){ return outMin < inMin ? 1440 - inMin + outMin : outMin - inMin; }
 
 /* Picks the shift for a clock-in and/or clock-out (raw strings, rounded to the half hour here).
-   1. The planned shift wins when it starts at the rounded in (if any) and ends within 30 min of the
-      rounded out (if any) — so an out-only row follows its plan.
+   1. Planned schedule first: the planned shift wins when the raw clock-in is less than 30 min from
+      its start (early or late). With no clock-in, the raw clock-out is compared to its end instead.
+      The out doesn't override a matching in — a long day is flagged as Possible Overtime.
    2. Otherwise the shift starting nearest the in (or, out-only, ending nearest the out), with the
       standard length: 9h on weekdays, 5h/6h on weekends (whichever fits the out, default 5h).
       Work on a day off has no standard, so its length follows the punches when both exist. */
 function matchShift({ tIn, tOut, weekend, offDay, planned }){
-  let inMin = roundToHalfHour(parseTime(tIn)), outMin = roundToHalfHour(parseTime(tOut));
-  if(inMin == null && outMin == null) return null;
+  let rawIn = parseTime(tIn), rawOut = parseTime(tOut);
+  if(rawIn == null && rawOut == null) return null;
 
-  if(planned && !offDay && planned.startMin != null && planned.endMin != null
-     && (inMin == null || inMin === planned.startMin)
-     && (outMin == null || circDiff(outMin, planned.endMin) <= 30)) return planned;
+  if(planned && !offDay && planned.startMin != null && planned.endMin != null){
+    let off = rawIn != null ? circDiff(rawIn, planned.startMin) : circDiff(rawOut, planned.endMin);
+    if(off < PLAN_TOLERANCE) return planned;
+  }
+
+  let inMin = roundToHalfHour(rawIn), outMin = roundToHalfHour(rawOut);
 
   let span;
   if(inMin != null && outMin != null && offDay) span = spanOf(inMin, outMin);

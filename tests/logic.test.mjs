@@ -32,11 +32,12 @@ test('clock times round to the nearest half hour, :15/:45 up', () => {
   assert.equal(r('23:50'), '00:00');
 });
 
-test('weekday: shift starts at rounded clock-in with a 9h span', () => {
+test('off-plan weekday: shift starts at rounded clock-in with a 9h span', () => {
   const app = loadApp();
+  // Planned HK14A (14:00) is far from these punches, so the rounding rules decide.
   const [a, b, c] = analyzeRows(app, [
-    row(MON, { plan: 'HK8E', fin: '08:45', fout: '18:02' }),
-    row(MON, { plan: 'HK8E', fin: '08:27', fout: '17:35' }),
+    row(MON, { plan: 'HK14A', fin: '08:45', fout: '18:02' }),
+    row(MON, { plan: 'HK14A', fin: '08:27', fout: '17:35' }),
     row(MON, { plan: 'HK9E', fin: '09:00', fout: '21:00' }),
   ]);
   assert.equal(a.ActualShiftCode, 'HK9E');
@@ -61,9 +62,9 @@ test('planned shift wins when it fits; out-only rows follow the plan or the out'
 test('weekend: 5h or 6h by clock-out (default 5h); Friday night into Saturday stays 9h', () => {
   const app = loadApp();
   const [five, six, sunInOnly, fri] = analyzeRows(app, [
-    row(SAT, { plan: 'HK8E', fin: '08:00', fout: '13:05' }),
-    row(SAT, { plan: 'HK8E', fin: '08:00', fout: '14:10' }),
-    row(SUN, { plan: 'HK8E', fin: '08:50' }),
+    row(SAT, { plan: 'HK14A', fin: '08:00', fout: '13:05' }),
+    row(SAT, { plan: 'HK14A', fin: '08:00', fout: '14:10' }),
+    row(SUN, { plan: 'HK14A', fin: '08:50' }),
     row(FRI, { plan: 'HK22B', fin: '22:00', fout: '07:02', foutDate: SAT }),
   ]);
   assert.equal(five.ActualShiftCode, 'HK8B');
@@ -86,7 +87,7 @@ test('planned day off: no punch stays OFF, a punch gets a Libur code', () => {
 
 test('editing one clock time realigns the other, code and description', () => {
   const app = loadApp();
-  analyzeRows(app, [row(MON, { plan: 'HK8E', fin: '08:45', fout: '18:02' })]);
+  analyzeRows(app, [row(MON, { plan: 'HK22B', fin: '08:45', fout: '18:02' })]);
   app.run("setFieldTimeDate(0, 'ActualTimeIn', '08:27')");
   let r = app.run('rows[0]');
   assert.deepEqual(pick(r), { code: 'HK85E', in: '08:27', dateOut: MON, out: '17:30', issue: r.Issue });
@@ -130,4 +131,30 @@ test('saved master: v2 is restored, pre-fix v1 (raw fractions) is discarded', ()
   const v1 = loadApp({ storage: { 'dsvsora.master': JSON.stringify({ list: [{ code: 'HK7A', desc: 'x', start: '0.2916', end: '0.5' }] }) } });
   assert.equal(v1.run('master.length'), 314);
   assert.ok(!('dsvsora.master' in v1.store));
+});
+
+test('planned schedule first: a punch less than 30 min from the plan keeps it', () => {
+  const app = loadApp();
+  const [inOnly, outOnly, early, late20, late29, late30, late45, longDay, satPlan] = analyzeRows(app, [
+    row(MON, { plan: 'HK85E', fin: '08:23' }),                 // out filled from the plan
+    row(MON, { plan: 'HK9E', fout: '18:00' }),                 // in filled from the plan
+    row(MON, { plan: 'HK8F', fin: '07:35' }),
+    row(MON, { plan: 'HK8F', fin: '08:20' }),
+    row(MON, { plan: 'HK8F', fin: '08:29' }),
+    row(MON, { plan: 'HK8F', fin: '08:30' }),                  // 30 min late: leaves the plan
+    row(MON, { plan: 'HK8F', fin: '08:45' }),
+    row(MON, { plan: 'HK8F', fin: '08:05', fout: '20:00' }),   // the out doesn't override the plan
+    row(SAT, { plan: 'HK8F', fin: '08:10' }),                  // plan beats the 5h weekend default
+  ]);
+  assert.deepEqual([inOnly.ActualShiftCode, inOnly.ActualTimeIn, inOnly.ActualTimeOut], ['HK85E', '08:23', '17:30']);
+  assert.deepEqual([outOnly.ActualShiftCode, outOnly.ActualTimeIn, outOnly.ActualTimeOut], ['HK9E', '09:00', '18:00']);
+  assert.equal(early.ActualShiftCode, 'HK8F');
+  assert.equal(late20.ActualShiftCode, 'HK8F');
+  assert.equal(late29.ActualShiftCode, 'HK8F');
+  assert.equal(late30.ActualShiftCode, 'HK85E');
+  assert.equal(late45.ActualShiftCode, 'HK9E');
+  assert.equal(longDay.ActualShiftCode, 'HK8F');
+  assert.match(longDay.Issue, /Possible Overtime/);
+  assert.equal(satPlan.ActualShiftCode, 'HK8F');
+  for (const r of [inOnly, outOnly, early, late20, late29, longDay, satPlan]) assert.doesNotMatch(r.Issue, /Shift Mismatch/);
 });
