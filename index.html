@@ -686,7 +686,9 @@ function isWeekend(dayStr, dateStr){
 /* ---------- shift master ---------- */
 /* An uploaded master is kept in this browser's localStorage so it survives reloads; storage can be
    blocked (private window, cleared site data), in which case we quietly fall back to the embedded list. */
-const MASTER_KEY = 'dsvsora.master';
+const MASTER_KEY = 'dsvsora.master.v2';
+// v1 was saved before Excel time cells were decoded, so its times are raw fractions ("0.2916…"). Drop it.
+try{ localStorage.removeItem('dsvsora.master'); } catch(err){}
 function saveMaster(list, source){
   try{
     if(list) localStorage.setItem(MASTER_KEY, JSON.stringify({ list, source }));
@@ -699,6 +701,16 @@ function loadMaster(){
     let s = JSON.parse(localStorage.getItem(MASTER_KEY));
     return (s && Array.isArray(s.list) && s.list.length) ? s : null;
   } catch(err){ return null; }
+}
+/* Rows whose ShiftName time range ("Hari Kerja 08.30 - 17.30") disagrees with the start/end columns.
+   24.00 is read as 00:00, and the HR file's 23:59 stand-in for a 24.00 start is accepted too. */
+function masterMismatches(list){
+  let norm = t => { let m = parseTime(t); return m == null ? null : (m === 1439 ? 0 : m % 1440); };
+  return list.filter(x => {
+    let p = parseShift(x.desc);
+    if(!p) return false;
+    return norm(x.start) !== p.start % 1440 || norm(x.end) !== p.end % 1440;
+  });
 }
 function prepMaster(list, source){
   let pill = document.getElementById('masterSource');
@@ -1171,6 +1183,12 @@ document.getElementById('masterInput').onchange = e => {
         start: cellTime(pick(x, 'ShiftStartTime', 'Start Time')).trim(),
         end: cellTime(pick(x, 'ShiftEndTime', 'End Time')).trim()
       })).filter(x => x.code);
+      let bad = masterMismatches(list);
+      if(bad.length && !confirm(
+        `${bad.length} of ${list.length} shifts have start/end times that don't match their name — the time columns may be shifted or sorted separately:\n\n`
+        + bad.slice(0, 5).map(x => `${x.code}: "${x.desc}" but ${x.start} - ${x.end}`).join('\n')
+        + (bad.length > 5 ? `\n…and ${bad.length - 5} more` : '')
+        + '\n\nLoad this file anyway?')) { e.target.value = ''; return; }
       if(list.length > 0){
         let source = { name: e.target.files[0].name, date: new Date().toLocaleDateString('en-GB') };
         let saved = saveMaster(list, source);
