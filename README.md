@@ -17,3 +17,14 @@ Editing Actual Time In picks the shift that starts at that time and sets Actual 
 Live: https://valerine-queen.github.io/dsvsora/ — redeploys automatically on every push to `main`.
 
 `combined_attendance_control_engine.html` is the original single-file draft, kept for reference.
+
+## Making changes
+
+`main` is production — every push to it goes live on GitHub Pages. So changes go through a branch first:
+
+1. Work on a branch (`git checkout -b fix-something`), push it, open a pull request.
+2. **Tests** run automatically on every push (`.github/workflows/test.yml`). Locally: `node --test tests/` (Node 20+, no install needed). The tests load the real `<script>` from `index.html` and check the shift-matching rules, Excel cell parsing and saved-master handling.
+3. **Preview** the branch with real data before merging: `https://raw.githack.com/valerine-queen/dsvsora/<branch>/index.html` (the Actions run summary also links the exact commit).
+4. Merge the PR only when tests are green and the preview checks out.
+
+When a rule changes, change its test in `tests/logic.test.mjs` in the same PR.
