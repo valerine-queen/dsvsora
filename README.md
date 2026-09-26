@@ -10,7 +10,7 @@ Clock-in/out times are rounded to the nearest half hour, :15 and :45 roll up (08
 
 If the planned shift is a day off (OFF / Libur) but there is a clock-in, the match is made against the "Hari Libur" variants (e.g. `HK19AOFF`) instead of the regular "Hari Kerja" shifts, and the row is flagged Overtime Holiday.
 
-Editing Actual Time In picks the shift that starts at that time and sets Actual Time Out to its end (and vice versa); the shift code, description and out-date follow. Ties go to the shift closest in length to the current one.
+Editing Actual Time In picks the shift that starts at that time and sets Actual Time Out to its end (and vice versa); the shift code, description and out-date follow. It uses the same rules as a one-sided punch above.
 
 Live: https://valerine-queen.github.io/dsvsora/ — redeploys automatically on every push to `main`.
 
