@@ -1,0 +1,25 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Run logic tests
+        run: node --test tests/
+      - name: Preview link
+        if: github.event_name == 'push' && github.ref_name != 'main'
+        run: |
+          url="https://raw.githack.com/${{ github.repository }}/${{ github.sha }}/index.html"
+          echo "Preview this commit: $url" >> "$GITHUB_STEP_SUMMARY"
+          echo "Preview: $url"
